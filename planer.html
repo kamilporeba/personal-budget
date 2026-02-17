@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Harmo Kliker - Planer Chronologiczny</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & Babel CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- html2canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .cursor-grab { cursor: grab; }
+        .cursor-grabbing { cursor: grabbing; }
+        [draggable] { user-select: none; }
+        .save-indicator { transition: opacity 0.5s ease; }
+        
+        /* Style dla interaktywnego widoku */
+        .lane-container { height: 180px; display: flex; flex-direction: column; }
+        .lane-header-spacer { height: 40px; flex-shrink: 0; }
+        .lane-slot { flex: 1; width: 100%; position: relative; border-bottom: 1px solid rgba(226, 232, 240, 0.3); }
+
+        /* Style dla widoku eksportu */
+        .export-lane-container { height: 220px; display: flex; flex-direction: column; }
+        .export-lane-header { height: 60px; flex-shrink: 0; display: flex; align-items: center; }
+        .export-lane-slot { flex: 1; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; }
+        .export-line { height: 12px; width: 100%; border-radius: 99px; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, Fragment, useRef } = React;
+
+        const STORAGE_KEY = 'harmo_kliker_data';
+        const ROLE_ORDER = ['analysis_biz', 'analysis_sys', 'design', 'dev_backend', 'dev_mobile', 'qa_backend', 'qa_mobile'];
+
+        const getRoleLabel = (r) => ({ 
+            analysis_biz: 'Analiza Biznesowa', 
+            analysis_sys: 'Analiza Systemowa', 
+            design: 'Design / UX', 
+            dev_backend: 'Dev Backend', 
+            dev_mobile: 'Dev Mobile', 
+            qa_backend: 'QA Backend', 
+            qa_mobile: 'QA Mobile' 
+        }[r]);
+        
+        const getRoleAbbr = (r) => ({ 
+            analysis_biz: 'AB', 
+            analysis_sys: 'AS', 
+            design: 'Des', 
+            dev_backend: 'DevBE', 
+            dev_mobile: 'DevMob', 
+            qa_backend: 'QAB', 
+            qa_mobile: 'QAM' 
+        }[r]);
+        
+        const getRoleColor = (role) => {
+            switch (role) {
+                case 'analysis_biz': return 'bg-purple-200 border-purple-300 text-purple-900';
+                case 'analysis_sys': return 'bg-purple-600 border-purple-700 text-white';
+                case 'design': return 'bg-pink-500 border-pink-600 text-white';
+                case 'dev_backend': return 'bg-blue-700 border-blue-800 text-white';
+                case 'dev_mobile': return 'bg-blue-400 border-blue-500 text-white';
+                case 'qa_backend': return 'bg-emerald-600 border-emerald-700 text-white';
+                case 'qa_mobile': return 'bg-emerald-400 border-emerald-500 text-emerald-950';
+                default: return 'bg-gray-500 text-white';
+            }
+        };
+
+        const getExportLineColor = (role) => {
+            switch (role) {
+                case 'analysis_biz': return 'bg-purple-300';
+                case 'analysis_sys': return 'bg-purple-600';
+                case 'design': return 'bg-pink-500';
+                case 'dev_backend': return 'bg-blue-700';
+                case 'dev_mobile': return 'bg-blue-400';
+                case 'qa_backend': return 'bg-emerald-600';
+                case 'qa_mobile': return 'bg-emerald-400';
+                default: return 'bg-gray-500';
+            }
+        };
+
+        const Icon = ({ name, size = 16, className = "" }) => {
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            const [tasks, setTasks] = useState([]);
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [showSaveToast, setShowSaveToast] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const [sprintCount, setSprintCount] = useState(20);
+            const [selectedRole, setSelectedRole] = useState('all');
+            const [isExporting, setIsExporting] = useState(false);
+            const [isFormOpen, setIsFormOpen] = useState(false);
+            
+            const [editingBlock, setEditingBlock] = useState(null);
+            const [editDuration, setEditDuration] = useState(1);
+
+            const [dragState, setDragState] = useState(null);
+            const [dragOverSprint, setDragOverSprint] = useState(null);
+
+            const [newArea, setNewArea] = useState('');
+            const [newTaskName, setNewTaskName] = useState('');
+
+            // --- PERSYSTENCJA ---
+            useEffect(() => {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        if (Array.isArray(parsed)) setTasks(parsed);
+                    } catch (e) { console.error(e); }
+                } else {
+                    setTasks([
+                        { 
+                            id: '1', area: 'Onboarding', name: 'Pierwszy identyfikator', 
+                            schedule: {
+                                analysis_biz: { start: 1, duration: 1 },
+                                analysis_sys: { start: 1, duration: 1 },
+                                design: { start: 2, duration: 1 },
+                                dev_backend: { start: 2, duration: 2 },
+                                dev_mobile: { start: 3, duration: 2 },
+                                qa_backend: { start: 4, duration: 1 },
+                                qa_mobile: { start: 5, duration: 1 }
+                            }
+                        }
+                    ]);
+                }
+                setIsLoaded(true);
+            }, []);
+
+            useEffect(() => {
+                if (isLoaded) {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+                    setShowSaveToast(true);
+                    const timer = setTimeout(() => setShowSaveToast(false), 2000);
+                    return () => clearTimeout(timer);
+                }
+            }, [tasks, isLoaded]);
+
+            // --- LOGIKA ---
+            const uniqueAreas = useMemo(() => [...new Set(tasks.map(t => t.area))], [tasks]);
+
+            const groupedTasks = useMemo(() => {
+                const groups = {};
+                uniqueAreas.forEach(a => groups[a] = []);
+                tasks.forEach(t => {
+                    if (!groups[t.area]) groups[t.area] = [];
+                    groups[t.area].push(t);
+                });
+                return groups;
+            }, [tasks, uniqueAreas]);
+
+            const addTask = (e) => {
+                e.preventDefault();
+                const id = Date.now().toString();
+                const schedule = {};
+                ROLE_ORDER.forEach(r => { schedule[r] = { start: 0, duration: 0 }; });
+                const newTask = { id, area: newArea || 'Ogólne', name: newTaskName || 'Nowe Zadanie', schedule };
+                setTasks([...tasks, newTask]);
+                setNewTaskName('');
+                setIsFormOpen(false);
+            };
+
+            const allocateRole = (taskId, role, sprintIndex) => {
+                setTasks(prev => prev.map(t => {
+                    if (t.id === taskId) {
+                        return {
+                            ...t,
+                            schedule: {
+                                ...t.schedule,
+                                [role]: { start: sprintIndex + 1, duration: 1 }
+                            }
+                        };
+                    }
+                    return t;
+                }));
+            };
+
+            const moveTask = (taskId, direction) => {
+                const task = tasks.find(t => t.id === taskId);
+                if (!task) return;
+                
+                // Znajdź wszystkie zadania z tego samego obszaru w kolejności występowania
+                // Używamy oryginalnej tablicy tasks, aby zachować kolejność
+                const tasksInArea = tasks.filter(t => t.area === task.area);
+                const currentIndexInGroup = tasksInArea.findIndex(t => t.id === taskId);
+                
+                // Sprawdź czy ruch jest możliwy
+                if (direction === -1 && currentIndexInGroup === 0) return; // Już na górze
+                if (direction === 1 && currentIndexInGroup === tasksInArea.length - 1) return; // Już na dole
+
+                const targetTaskInGroup = tasksInArea[currentIndexInGroup + direction];
+                
+                // Znajdź indeksy w głównej tablicy
+                const indexA = tasks.findIndex(t => t.id === taskId);
+                const indexB = tasks.findIndex(t => t.id === targetTaskInGroup.id);
+
+                // Zamień miejscami
+                const newTasks = [...tasks];
+                [newTasks[indexA], newTasks[indexB]] = [newTasks[indexB], newTasks[indexA]];
+                setTasks(newTasks);
+            };
+
+            const exportAsJSON = () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
+                const link = document.createElement('a');
+                link.href = dataStr;
+                link.download = "harmo_kliker_baza.json";
+                link.click();
+            };
+
+            const exportAsJPG = async () => {
+                const element = document.getElementById('printable-export-view');
+                if (!element) return;
+                
+                setIsExporting(true);
+                await new Promise(r => setTimeout(r, 200));
+
+                try {
+                    const canvas = await window.html2canvas(element, {
+                        scale: 2, 
+                        backgroundColor: '#ffffff',
+                        width: 2400, 
+                        windowWidth: 2400,
+                        useCORS: true,
+                        logging: false
+                    });
+                    const link = document.createElement('a');
+                    link.href = canvas.toDataURL("image/jpeg", 0.9);
+                    link.download = `Harmonogram-Projektu-${new Date().toISOString().slice(0, 10)}.jpg`;
+                    link.click();
+                } catch(e) {
+                    console.error(e);
+                } finally {
+                    setIsExporting(false);
+                }
+            };
+
+            const saveEdit = () => {
+                if (!editingBlock) return;
+                setTasks(prev => prev.map(t => t.id === editingBlock.taskId ? {
+                    ...t,
+                    schedule: { ...t.schedule, [editingBlock.role]: { ...t.schedule[editingBlock.role], duration: editDuration } }
+                } : t));
+                setEditingBlock(null);
+            };
+
+            const handleDragStart = (e, taskId, role, sprintIdx) => {
+                const task = tasks.find(t => t.id === taskId);
+                const offset = (sprintIdx + 1) - task.schedule[role].start;
+                setDragState({ taskId, role, dragOffset: offset });
+            };
+
+            const handleDrop = (e, targetSprintIndex) => {
+                e.preventDefault();
+                setDragOverSprint(null);
+                if (!dragState) return;
+                let ns = (targetSprintIndex + 1) - dragState.dragOffset;
+                if (ns < 1) ns = 1;
+                if (ns > sprintCount) ns = sprintCount;
+                setTasks(prev => prev.map(t => t.id === dragState.taskId ? {
+                    ...t,
+                    schedule: { ...t.schedule, [dragState.role]: { ...t.schedule[dragState.role], start: ns } }
+                } : t));
+                setDragState(null);
+            };
+
+            return (
+                <div className="p-4 min-h-screen">
+                    <input type="file" ref={fileInputRef} onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            try {
+                                const json = JSON.parse(ev.target.result);
+                                if (Array.isArray(json)) setTasks(json);
+                            } catch (err) { alert("Błąd pliku"); }
+                        };
+                        reader.readAsText(file);
+                    }} className="hidden" accept=".json" />
+
+                    <div className={`fixed bottom-4 right-4 bg-slate-800 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 shadow-2xl z-[200] save-indicator ${showSaveToast ? 'opacity-100' : 'opacity-0'}`}>
+                        <Icon name="check-circle" size={14} className="text-emerald-400"/> ZAPISANO
+                    </div>
+
+                    {editingBlock && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+                                <div className={`p-4 flex justify-between items-center ${getRoleColor(editingBlock.role).split(' ')[0]}`}>
+                                    <h2 className="text-sm font-black uppercase tracking-tight">Czas trwania: {getRoleLabel(editingBlock.role)}</h2>
+                                    <button onClick={() => setEditingBlock(null)}><Icon name="x" size={20}/></button>
+                                </div>
+                                <div className="p-6 space-y-4">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Ile sprintów zajmie ta praca?</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {[0, 1, 2, 3, 4, 5, 6, 8, 10].map(n => (
+                                            <button key={n} onClick={() => setEditDuration(n)} className={`flex-1 min-w-[60px] py-3 rounded-xl border-2 font-bold transition-all ${editDuration === n ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-100 text-slate-400'}`}>
+                                                {n === 0 ? 'Usuń' : n}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button onClick={saveEdit} className="w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Zastosuj</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="mb-6 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2 italic tracking-tight uppercase">
+                                    <Icon name="bar-chart-3" className="text-indigo-600"/> HARMO KLIKER
+                                </h1>
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">20 Sprintów • Kliknij slot by alokować • Filtruj tory poniżej</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => fileInputRef.current.click()} className="flex items-center gap-2 bg-white text-slate-600 px-4 py-2 rounded-lg font-black text-[10px] uppercase border hover:bg-slate-50 transition-colors">
+                                    <Icon name="upload" size={14}/> Wczytaj JSON
+                                </button>
+                                <button onClick={exportAsJSON} className="flex items-center gap-2 bg-white text-slate-600 px-4 py-2 rounded-lg font-black text-[10px] uppercase border hover:bg-slate-50 transition-colors">
+                                    <Icon name="database" size={14}/> Pobierz JSON
+                                </button>
+                                <button onClick={exportAsJPG} disabled={isExporting} className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg font-black text-[10px] uppercase border border-emerald-100 hover:bg-emerald-100 transition-colors disabled:opacity-50">
+                                    {isExporting ? <Icon name="loader-2" className="animate-spin" size={14}/> : <Icon name="download" size={14}/>} JPG
+                                </button>
+                                <button onClick={() => setIsFormOpen(!isFormOpen)} className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-black text-xs uppercase shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-colors">
+                                    <Icon name="plus" size={14}/> Nowe Zadanie
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                            <button 
+                                onClick={() => setSelectedRole('all')} 
+                                className={`px-4 py-2 text-[10px] font-black uppercase rounded-full transition-all ${selectedRole === 'all' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                            >
+                                Wszystkie tory
+                            </button>
+                            {ROLE_ORDER.map(r => (
+                                <button 
+                                    key={r} 
+                                    onClick={() => setSelectedRole(r)} 
+                                    className={`px-4 py-2 text-[10px] font-black uppercase rounded-full flex items-center gap-2 transition-all ${selectedRole === r ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                >
+                                    <span className={`w-2 h-2 rounded-full ${getRoleColor(r).split(' ')[0]}`}></span>{getRoleLabel(r)}
+                                </button>
+                            ))}
+                        </div>
+
+                        {isFormOpen && (
+                            <form onSubmit={addTask} className="mt-6 p-6 bg-slate-50 rounded-2xl border border-slate-200 animate-in fade-in slide-in-from-top-4">
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                                    <div className="md:col-span-4">
+                                        <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase tracking-widest">Obszar / Epik</label>
+                                        <input list="areas" className="w-full p-3 rounded-xl border text-sm" placeholder="np. Onboarding" value={newArea} onChange={e => setNewArea(e.target.value)} required />
+                                        <datalist id="areas">{uniqueAreas.map(a => <option key={a} value={a}/>)}</datalist>
+                                    </div>
+                                    <div className="md:col-span-8">
+                                        <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase tracking-widest">Nazwa Zadania</label>
+                                        <input className="w-full p-3 rounded-xl border text-sm" placeholder="Co robimy? (Kompetencje alokujesz klikając w tory)" value={newTaskName} onChange={e => setNewTaskName(e.target.value)} required />
+                                    </div>
+                                </div>
+                                <button type="submit" className="mt-4 w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-[0.2em] hover:bg-slate-900 transition-all">Stwórz Zadanie</button>
+                            </form>
+                        )}
+                    </div>
+
+                    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                        <div className="overflow-x-auto select-none">
+                            <table className="w-full border-collapse table-fixed min-w-[1800px]">
+                                <thead>
+                                    <tr className="bg-slate-50 h-14 border-b">
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase w-[280px] sticky left-0 bg-slate-50 z-30 border-r shadow-sm">Zadanie & Tory</th>
+                                        {Array.from({ length: sprintCount }).map((_, i) => (
+                                            <th key={i} className={`p-2 text-center text-[10px] font-black w-[80px] border-l uppercase tracking-widest ${dragOverSprint === i ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400'}`}>S{i+1}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.entries(groupedTasks).map(([area, areaTasks]) => (
+                                        <Fragment key={area}>
+                                            <tr className="bg-slate-800 text-white text-[9px] font-black uppercase tracking-[0.2em] shadow-inner">
+                                                <td colSpan={sprintCount+1} className="p-2.5 pl-4 sticky left-0 z-20 flex items-center gap-2 italic">
+                                                    <Icon name="folder" size={14} className="text-indigo-400"/> {area}
+                                                </td>
+                                            </tr>
+                                            {areaTasks.map(task => (
+                                                <tr key={task.id} className="border-b hover:bg-slate-50/20 transition-colors group">
+                                                    <td className="p-0 sticky left-0 bg-white z-20 border-r shadow-md">
+                                                        <div className="lane-container">
+                                                            <div className="lane-header-spacer p-3 text-xs font-black text-slate-700 truncate border-b border-slate-50 flex justify-between items-center bg-white">
+                                                                <div className="flex items-center gap-1 overflow-hidden">
+                                                                    <div className="flex flex-col gap-0.5 mr-1 shrink-0">
+                                                                        <button 
+                                                                            onClick={() => moveTask(task.id, -1)} 
+                                                                            disabled={areaTasks.indexOf(task) === 0}
+                                                                            className="text-slate-300 hover:text-indigo-600 disabled:opacity-0 transition-colors flex items-center justify-center h-2 w-3"
+                                                                        >
+                                                                            <Icon name="chevron-up" size={12} />
+                                                                        </button>
+                                                                        <button 
+                                                                            onClick={() => moveTask(task.id, 1)} 
+                                                                            disabled={areaTasks.indexOf(task) === areaTasks.length - 1}
+                                                                            className="text-slate-300 hover:text-indigo-600 disabled:opacity-0 transition-colors flex items-center justify-center h-2 w-3"
+                                                                        >
+                                                                            <Icon name="chevron-down" size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                    <span className="truncate pr-2 leading-relaxed pb-1">{task.name}</span>
+                                                                </div>
+                                                                <button onClick={() => setTasks(tasks.filter(t => t.id !== task.id))} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all no-export shrink-0">
+                                                                    <Icon name="trash-2" size={12}/>
+                                                                </button>
+                                                            </div>
+                                                            {ROLE_ORDER.map(r => (
+                                                                <div key={r} className={`lane-slot px-3 text-[7px] font-black uppercase flex items-center transition-opacity ${selectedRole !== 'all' && selectedRole !== r ? 'opacity-0 pointer-events-none' : 'text-slate-300'}`}>
+                                                                    {getRoleAbbr(r)}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                    {Array.from({ length: sprintCount }).map((_, sIdx) => (
+                                                        <td key={sIdx} className={`p-0 border-l relative ${dragOverSprint === sIdx ? 'bg-indigo-50/30' : ''}`} onDragOver={e => { e.preventDefault(); setDragOverSprint(sIdx); }} onDrop={e => handleDrop(e, sIdx)}>
+                                                            <div className="lane-container">
+                                                                <div className="lane-header-spacer border-b border-slate-50/30"></div>
+                                                                {ROLE_ORDER.map(role => {
+                                                                    const s = task.schedule[role];
+                                                                    const active = s && s.duration > 0 && (sIdx+1) >= s.start && (sIdx+1) < s.start + s.duration;
+                                                                    const vis = selectedRole === 'all' || selectedRole === role;
+                                                                    
+                                                                    return (
+                                                                        <div 
+                                                                            key={role} 
+                                                                            className={`lane-slot ${!vis ? 'opacity-0 pointer-events-none' : 'cursor-pointer hover:bg-indigo-50/50'}`}
+                                                                            onClick={() => !active && vis && allocateRole(task.id, role, sIdx)}
+                                                                        >
+                                                                            {active && (
+                                                                                <div 
+                                                                                    draggable 
+                                                                                    onDragStart={e => handleDragStart(e, task.id, role, sIdx)} 
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setEditingBlock({ taskId: task.id, role });
+                                                                                        setEditDuration(task.schedule[role].duration);
+                                                                                    }} 
+                                                                                    className={`absolute inset-0 m-[1.5px] rounded-[3px] shadow-sm border flex items-center justify-center text-[9px] font-black tracking-tighter transition-all hover:scale-[1.03] hover:shadow-md cursor-grab active:cursor-grabbing ${getRoleColor(role)}`}
+                                                                                >
+                                                                                    {getRoleAbbr(role)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* --- UKRYTY WIDOK DO EKSPORTU (Zwiększona szerokość do 2400px) --- */}
+                    <div id="printable-export-view" style={{ position: 'absolute', top: -9999, left: -9999, width: '2400px', backgroundColor: 'white' }} className="p-8">
+                        <div className="flex justify-between items-end mb-8 border-b-2 border-slate-800 pb-4">
+                            <div>
+                                <h1 className="text-4xl font-black text-slate-800 tracking-tight italic uppercase">HARMONOGRAM PROJEKTU</h1>
+                                <p className="text-slate-500 font-bold uppercase mt-2">Wygenerowano: {new Date().toLocaleDateString()}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-4 max-w-[1000px] justify-end">
+                                {ROLE_ORDER.map(role => (
+                                    <div key={role} className="flex items-center gap-2">
+                                        <div className={`w-8 h-3 rounded-full ${getExportLineColor(role)}`}></div>
+                                        <span className="text-[10px] font-black uppercase text-slate-600">{getRoleLabel(role)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="border border-slate-300 rounded-lg overflow-hidden">
+                            <table className="w-full border-collapse table-fixed">
+                                <thead>
+                                    <tr className="bg-slate-100 h-12 border-b border-slate-300">
+                                        <th className="p-3 text-left text-xs font-black text-slate-600 uppercase w-[300px] border-r border-slate-300">Zadanie</th>
+                                        {Array.from({ length: sprintCount }).map((_, i) => (
+                                            <th key={i} className="p-1 text-center text-[10px] font-bold text-slate-500 w-[80px] border-l border-slate-300 bg-slate-50 uppercase">S{i+1}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.entries(groupedTasks).map(([area, areaTasks]) => (
+                                        <Fragment key={area}>
+                                            <tr className="bg-slate-800 border-b border-slate-800">
+                                                <td colSpan={sprintCount+1} className="p-2 pl-4 text-xs font-black text-white uppercase tracking-widest">{area}</td>
+                                            </tr>
+                                            {areaTasks.map(task => (
+                                                <tr key={task.id} className="border-b border-slate-200">
+                                                    <td className="p-0 border-r border-slate-200 bg-white">
+                                                        <div className="export-lane-container">
+                                                            <div className="export-lane-header px-4 bg-slate-50 border-b border-slate-100 flex items-center">
+                                                                <span className="text-sm font-bold text-slate-800 truncate leading-relaxed py-1 block w-full leading-normal pb-1">{task.name}</span>
+                                                            </div>
+                                                            <div className="flex-1 bg-white">
+                                                                {ROLE_ORDER.map(r => <div key={r} className="export-lane-slot border-b border-slate-50"></div>)}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    {Array.from({ length: sprintCount }).map((_, sIdx) => (
+                                                        <td key={sIdx} className="p-0 border-l border-slate-100 relative">
+                                                            <div className="export-lane-container">
+                                                                <div className="export-lane-header border-b border-slate-100 bg-slate-50/30"></div>
+                                                                {ROLE_ORDER.map(role => {
+                                                                    const s = task.schedule[role];
+                                                                    const active = s && s.duration > 0 && (sIdx+1) >= s.start && (sIdx+1) < s.start + s.duration;
+                                                                    return (
+                                                                        <div key={role} className="export-lane-slot border-b border-slate-50">
+                                                                            {active && (
+                                                                                <div className="px-1 w-full">
+                                                                                    <div className={`export-line ${getExportLineColor(role)} shadow-sm`}></div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="mt-4 text-right text-slate-400 text-[10px] font-bold uppercase tracking-widest">Harmo Kliker • System Planowania Projektowego</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
