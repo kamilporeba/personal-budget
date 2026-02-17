@@ -14,8 +14,6 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- html2canvas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <!-- SheetJS with Styles (xlsx-js-style) -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -231,147 +229,56 @@
                 link.click();
             };
 
-            // Eksport do Excela z UKŁADEM TORÓW
+            // Eksport do Excela (Native HTML) - bez biblioteki SheetJS!
             const exportAsExcel = () => {
-                if (typeof XLSX === 'undefined') {
-                    alert("Biblioteka Excel nie jest jeszcze załadowana. Spróbuj za chwilę.");
-                    return;
-                }
-
-                // Definicje kolorów (HEX) dla Excela
+                // Definicje kolorów (HEX z #)
                 const roleColors = {
-                    analysis_biz: { fill: "E9D5FF", text: "581C87" },
-                    analysis_sys: { fill: "9333EA", text: "FFFFFF" },
-                    design: { fill: "EC4899", text: "FFFFFF" },
-                    dev_backend: { fill: "1D4ED8", text: "FFFFFF" },
-                    dev_mobile: { fill: "60A5FA", text: "FFFFFF" },
-                    qa_backend: { fill: "059669", text: "FFFFFF" },
-                    qa_mobile: { fill: "34D399", text: "022C22" }
+                    analysis_biz: { fill: "#E9D5FF", text: "#581C87" },
+                    analysis_sys: { fill: "#9333EA", text: "#FFFFFF" },
+                    design: { fill: "#EC4899", text: "#FFFFFF" },
+                    dev_backend: { fill: "#1D4ED8", text: "#FFFFFF" },
+                    dev_mobile: { fill: "#60A5FA", text: "#FFFFFF" },
+                    qa_backend: { fill: "#059669", text: "#FFFFFF" },
+                    qa_mobile: { fill: "#34D399", text: "#022C22" }
                 };
 
-                const ws_data = [];
-                // Nagłówek
-                const headerRow = ["Obszar", "Zadanie / Rola", "Notatka"];
-                for(let i=1; i<=sprintCount; i++) headerRow.push(`S${i}`);
-                ws_data.push(headerRow);
+                let tableHTML = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Harmonogram</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><style>td { border: 1px solid #cbd5e1; font-family: sans-serif; font-size: 10pt; vertical-align: middle; } .header { background-color: #0f172a; color: white; font-weight: bold; text-align: center; } .task-header { background-color: #1e293b; color: white; font-weight: bold; font-size: 12pt; } .role-label { background-color: #f8fafc; color: #64748b; text-align: right; }</style></head><body><table>';
 
-                // Style bazowe
-                const headerStyle = {
-                    font: { bold: true, color: { rgb: "FFFFFF" } },
-                    fill: { fgColor: { rgb: "0F172A" } }, // slate-900
-                    alignment: { horizontal: "center", vertical: "center" },
-                    border: { bottom: { style: "medium", color: { rgb: "FFFFFF" } } }
-                };
-                
-                const taskHeaderStyle = {
-                    font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-                    fill: { fgColor: { rgb: "1E293B" } }, // slate-800
-                    alignment: { vertical: "center" },
-                    border: { top: { style: "thin", color: { rgb: "CBD5E1" } } }
-                };
+                // Nagłówki
+                tableHTML += '<tr><td class="header" style="width: 200px">Obszar</td><td class="header" style="width: 400px">Zadanie / Rola</td><td class="header" style="width: 300px">Notatka</td>';
+                for(let i=1; i<=sprintCount; i++) tableHTML += `<td class="header" style="width: 60px">S${i}</td>`;
+                tableHTML += '</tr>';
 
-                const roleLabelStyle = {
-                    font: { sz: 10, color: { rgb: "64748B" } }, // slate-500
-                    alignment: { horizontal: "right", vertical: "center" },
-                    fill: { fgColor: { rgb: "F8FAFC" } } // slate-50
-                };
-
-                const borderStyle = {
-                    top: { style: "thin", color: { rgb: "E2E8F0" } },
-                    bottom: { style: "thin", color: { rgb: "E2E8F0" } },
-                    left: { style: "thin", color: { rgb: "E2E8F0" } },
-                    right: { style: "thin", color: { rgb: "E2E8F0" } }
-                };
-
-                // Budowanie danych wierszami
+                // Dane
                 tasks.forEach(task => {
-                    // 1. Wiersz Nagłówka Zadania
-                    const taskRow = [task.area, task.name, task.note || ""];
-                    for(let i=0; i<sprintCount; i++) taskRow.push("");
-                    ws_data.push(taskRow);
+                    // Wiersz Zadania
+                    tableHTML += `<tr><td class="task-header">${task.area}</td><td class="task-header">${task.name}</td><td class="task-header" style="white-space: normal;">${task.note || ''}</td>`;
+                    for(let i=0; i<sprintCount; i++) tableHTML += '<td class="task-header"></td>';
+                    tableHTML += '</tr>';
 
-                    // 2. Wiersze Ról (Tory)
+                    // Wiersze ról
                     ROLE_ORDER.forEach(role => {
-                        const roleRow = ["", getRoleLabel(role), ""]; // Pusty Obszar, Label Roli, Pusta notatka
+                        tableHTML += `<tr><td></td><td class="role-label">${getRoleLabel(role)}</td><td></td>`;
                         const schedule = task.schedule[role] || [];
                         for(let i=1; i<=sprintCount; i++) {
                             if (schedule.includes(i)) {
-                                roleRow.push(getRoleAbbr(role));
+                                const style = roleColors[role] ? `background-color: ${roleColors[role].fill}; color: ${roleColors[role].text}; font-weight: bold; text-align: center;` : '';
+                                tableHTML += `<td style="${style}">${getRoleAbbr(role)}</td>`;
                             } else {
-                                roleRow.push("");
+                                tableHTML += '<td></td>';
                             }
                         }
-                        ws_data.push(roleRow);
+                        tableHTML += '</tr>';
                     });
                 });
 
-                // Tworzenie arkusza
-                const ws = XLSX.utils.aoa_to_sheet(ws_data);
+                tableHTML += '</table></body></html>';
 
-                // Aplikowanie stylów
-                const range = XLSX.utils.decode_range(ws['!ref']);
-                for (let R = range.s.r; R <= range.e.r; ++R) {
-                    for (let C = range.s.c; C <= range.e.c; ++C) {
-                        const cellRef = XLSX.utils.encode_cell({c: C, r: R});
-                        if (!ws[cellRef]) ws[cellRef] = { v: "", t: "s" };
-                        const cell = ws[cellRef];
-
-                        // Domyślne obramowanie
-                        cell.s = { border: borderStyle, alignment: { vertical: "center" } };
-
-                        // Nagłówek Tabeli (Wiersz 0)
-                        if (R === 0) {
-                            cell.s = headerStyle;
-                        } 
-                        // Wiersze Danych
-                        else {
-                            // Sprawdzamy czy to wiersz nagłówkowy zadania (czy w 1. kolumnie (Obszar) jest tekst)
-                            // Uwaga: aoa_to_sheet wstawia dane, my musimy sprawdzić źródło danych, bo scalone komórki mogą mylić,
-                            // ale tutaj wstawiamy wiersz po wierszu. W wierszu roli kolumna A (0) jest pusta.
-                            const isTaskHeaderRow = ws_data[R][0] !== "";
-
-                            if (isTaskHeaderRow) {
-                                cell.s = taskHeaderStyle;
-                                if (C === 2) { // Notatka
-                                    cell.s = { ...taskHeaderStyle, alignment: { wrapText: true, vertical: "center" } };
-                                }
-                            } else {
-                                // Wiersz Roli
-                                if (C === 1) { // Nazwa roli
-                                    cell.s = roleLabelStyle;
-                                }
-                                else if (C >= 3) { // Kolumny Sprintów
-                                    const val = cell.v;
-                                    if (val !== "") {
-                                        // Kolorowanie klocków
-                                        const roleKey = ROLE_ORDER.find(r => getRoleAbbr(r) === val);
-                                        if (roleKey && roleColors[roleKey]) {
-                                            cell.s = {
-                                                fill: { fgColor: { rgb: roleColors[roleKey].fill } },
-                                                font: { color: { rgb: roleColors[roleKey].text }, bold: true },
-                                                alignment: { horizontal: "center", vertical: "center" },
-                                                border: borderStyle
-                                            };
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Szerokości kolumn
-                const wscols = [
-                    {wch: 15}, // Obszar
-                    {wch: 35}, // Zadanie/Rola
-                    {wch: 30}, // Notatka
-                ];
-                for(let i=0; i<sprintCount; i++) wscols.push({wch: 6}); // Wąskie kolumny sprintów
-                ws['!cols'] = wscols;
-
-                const workbook = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook, ws, "Harmonogram");
-                XLSX.writeFile(workbook, `Harmo-Kliker-${new Date().toISOString().slice(0, 10)}.xlsx`);
+                const blob = new Blob([tableHTML], { type: 'application/vnd.ms-excel' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `Harmo-Kliker-${new Date().toISOString().slice(0, 10)}.xls`;
+                link.click();
             };
 
             const exportAsJPG = async () => {
