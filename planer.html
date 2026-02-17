@@ -23,8 +23,8 @@
         .save-indicator { transition: opacity 0.5s ease; }
         
         /* Style dla interaktywnego widoku */
-        .lane-container { height: 180px; display: flex; flex-direction: column; }
-        .lane-header-spacer { height: 40px; flex-shrink: 0; }
+        .lane-container { height: 220px; display: flex; flex-direction: column; }
+        .lane-header-spacer { height: 60px; flex-shrink: 0; }
         .lane-slot { flex: 1; width: 100%; position: relative; border-bottom: 1px solid rgba(226, 232, 240, 0.3); }
 
         /* Style dla widoku eksportu */
@@ -107,12 +107,17 @@
             
             const [editingBlock, setEditingBlock] = useState(null);
             const [editDuration, setEditDuration] = useState(1);
+            
+            // Stan dla notatek
+            const [viewingNote, setViewingNote] = useState(null); // { taskId, content }
+            const [noteContent, setNoteContent] = useState("");
 
             const [dragState, setDragState] = useState(null);
             const [dragOverSprint, setDragOverSprint] = useState(null);
 
             const [newArea, setNewArea] = useState('');
             const [newTaskName, setNewTaskName] = useState('');
+            const [newNote, setNewNote] = useState('');
 
             // --- PERSYSTENCJA ---
             useEffect(() => {
@@ -125,7 +130,7 @@
                 } else {
                     setTasks([
                         { 
-                            id: '1', area: 'Onboarding', name: 'Pierwszy identyfikator', 
+                            id: '1', area: 'Onboarding', name: 'Pierwszy identyfikator (Przykład)', note: 'Wymaga ustaleń z zespołem Security w sprincie 2.',
                             schedule: {
                                 analysis_biz: { start: 1, duration: 1 },
                                 analysis_sys: { start: 1, duration: 1 },
@@ -168,9 +173,10 @@
                 const id = Date.now().toString();
                 const schedule = {};
                 ROLE_ORDER.forEach(r => { schedule[r] = { start: 0, duration: 0 }; });
-                const newTask = { id, area: newArea || 'Ogólne', name: newTaskName || 'Nowe Zadanie', schedule };
+                const newTask = { id, area: newArea || 'Ogólne', name: newTaskName || 'Nowe Zadanie', note: newNote, schedule };
                 setTasks([...tasks, newTask]);
                 setNewTaskName('');
+                setNewNote('');
                 setIsFormOpen(false);
             };
 
@@ -192,23 +198,16 @@
             const moveTask = (taskId, direction) => {
                 const task = tasks.find(t => t.id === taskId);
                 if (!task) return;
-                
-                // Znajdź wszystkie zadania z tego samego obszaru w kolejności występowania
-                // Używamy oryginalnej tablicy tasks, aby zachować kolejność
                 const tasksInArea = tasks.filter(t => t.area === task.area);
                 const currentIndexInGroup = tasksInArea.findIndex(t => t.id === taskId);
                 
-                // Sprawdź czy ruch jest możliwy
-                if (direction === -1 && currentIndexInGroup === 0) return; // Już na górze
-                if (direction === 1 && currentIndexInGroup === tasksInArea.length - 1) return; // Już na dole
+                if (direction === -1 && currentIndexInGroup === 0) return;
+                if (direction === 1 && currentIndexInGroup === tasksInArea.length - 1) return;
 
                 const targetTaskInGroup = tasksInArea[currentIndexInGroup + direction];
-                
-                // Znajdź indeksy w głównej tablicy
                 const indexA = tasks.findIndex(t => t.id === taskId);
                 const indexB = tasks.findIndex(t => t.id === targetTaskInGroup.id);
 
-                // Zamień miejscami
                 const newTasks = [...tasks];
                 [newTasks[indexA], newTasks[indexB]] = [newTasks[indexB], newTasks[indexA]];
                 setTasks(newTasks);
@@ -258,6 +257,12 @@
                 setEditingBlock(null);
             };
 
+            const saveNote = () => {
+                if (!viewingNote) return;
+                setTasks(prev => prev.map(t => t.id === viewingNote.taskId ? { ...t, note: noteContent } : t));
+                setViewingNote(null);
+            }
+
             const handleDragStart = (e, taskId, role, sprintIdx) => {
                 const task = tasks.find(t => t.id === taskId);
                 const offset = (sprintIdx + 1) - task.schedule[role].start;
@@ -297,6 +302,30 @@
                         <Icon name="check-circle" size={14} className="text-emerald-400"/> ZAPISANO
                     </div>
 
+                    {/* Modal Notatki */}
+                    {viewingNote && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                                <div className="p-4 flex justify-between items-center bg-yellow-100 border-b border-yellow-200">
+                                    <h2 className="text-sm font-black uppercase tracking-tight text-yellow-800 flex items-center gap-2">
+                                        <Icon name="file-text" size={16}/> Notatka do zadania
+                                    </h2>
+                                    <button onClick={() => setViewingNote(null)}><Icon name="x" size={20} className="text-yellow-800"/></button>
+                                </div>
+                                <div className="p-4">
+                                    <textarea 
+                                        className="w-full h-32 p-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-yellow-400 outline-none resize-none bg-yellow-50/50"
+                                        placeholder="Wpisz treść notatki..."
+                                        value={noteContent}
+                                        onChange={(e) => setNoteContent(e.target.value)}
+                                    ></textarea>
+                                    <button onClick={saveNote} className="w-full mt-4 py-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl font-bold uppercase tracking-widest shadow-lg transition-all">Zapisz Notatkę</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Modal Edycji Klocka */}
                     {editingBlock && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
@@ -373,6 +402,10 @@
                                         <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase tracking-widest">Nazwa Zadania</label>
                                         <input className="w-full p-3 rounded-xl border text-sm" placeholder="Co robimy? (Kompetencje alokujesz klikając w tory)" value={newTaskName} onChange={e => setNewTaskName(e.target.value)} required />
                                     </div>
+                                    <div className="md:col-span-12">
+                                        <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase tracking-widest">Notatka (opcjonalne)</label>
+                                        <textarea className="w-full p-3 rounded-xl border text-sm h-20 resize-none" placeholder="Np. wymaga ustaleń z zespołem Security" value={newNote} onChange={e => setNewNote(e.target.value)}></textarea>
+                                    </div>
                                 </div>
                                 <button type="submit" className="mt-4 w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-[0.2em] hover:bg-slate-900 transition-all">Stwórz Zadanie</button>
                             </form>
@@ -402,8 +435,8 @@
                                                 <tr key={task.id} className="border-b hover:bg-slate-50/20 transition-colors group">
                                                     <td className="p-0 sticky left-0 bg-white z-20 border-r shadow-md">
                                                         <div className="lane-container">
-                                                            <div className="lane-header-spacer p-3 text-xs font-black text-slate-700 truncate border-b border-slate-50 flex justify-between items-center bg-white">
-                                                                <div className="flex items-center gap-1 overflow-hidden">
+                                                            <div className="lane-header-spacer p-2 text-xs font-black text-slate-700 border-b border-slate-50 flex justify-between items-center bg-white">
+                                                                <div className="flex items-center gap-1 overflow-hidden w-full mr-1">
                                                                     <div className="flex flex-col gap-0.5 mr-1 shrink-0">
                                                                         <button 
                                                                             onClick={() => moveTask(task.id, -1)} 
@@ -420,7 +453,33 @@
                                                                             <Icon name="chevron-down" size={12} />
                                                                         </button>
                                                                     </div>
-                                                                    <span className="truncate pr-2 leading-relaxed pb-1">{task.name}</span>
+                                                                    <div className="flex items-center gap-2 overflow-hidden w-full">
+                                                                        {task.note && (
+                                                                            <button 
+                                                                                onClick={() => {
+                                                                                    setNoteContent(task.note);
+                                                                                    setViewingNote({ taskId: task.id });
+                                                                                }}
+                                                                                className="text-yellow-500 hover:text-yellow-600 shrink-0"
+                                                                                title="Zobacz notatkę"
+                                                                            >
+                                                                                <Icon name="file-text" size={14} className="fill-yellow-100" />
+                                                                            </button>
+                                                                        )}
+                                                                        {!task.note && (
+                                                                            <button 
+                                                                                onClick={() => {
+                                                                                    setNoteContent("");
+                                                                                    setViewingNote({ taskId: task.id });
+                                                                                }}
+                                                                                className="text-slate-200 hover:text-yellow-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                                title="Dodaj notatkę"
+                                                                            >
+                                                                                <Icon name="file-plus" size={14} />
+                                                                            </button>
+                                                                        )}
+                                                                        <span className="whitespace-normal leading-tight line-clamp-3 text-left w-full break-words" title={task.name}>{task.name}</span>
+                                                                    </div>
                                                                 </div>
                                                                 <button onClick={() => setTasks(tasks.filter(t => t.id !== task.id))} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all no-export shrink-0">
                                                                     <Icon name="trash-2" size={12}/>
@@ -514,8 +573,9 @@
                                                 <tr key={task.id} className="border-b border-slate-200">
                                                     <td className="p-0 border-r border-slate-200 bg-white">
                                                         <div className="export-lane-container">
-                                                            <div className="export-lane-header px-4 bg-slate-50 border-b border-slate-100 flex items-center">
-                                                                <span className="text-sm font-bold text-slate-800 truncate leading-relaxed py-1 block w-full leading-normal pb-1">{task.name}</span>
+                                                            <div className="export-lane-header px-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                                                                <span className="text-sm font-bold text-slate-800 whitespace-normal leading-tight break-words">{task.name}</span>
+                                                                {task.note && <div className="text-yellow-500 ml-2"><Icon name="file-text" size={16}/></div>}
                                                             </div>
                                                             <div className="flex-1 bg-white">
                                                                 {ROLE_ORDER.map(r => <div key={r} className="export-lane-slot border-b border-slate-50"></div>)}
