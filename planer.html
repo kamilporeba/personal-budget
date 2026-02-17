@@ -26,6 +26,7 @@
         .lane-container { height: 220px; display: flex; flex-direction: column; }
         .lane-header-spacer { height: 60px; flex-shrink: 0; }
         .lane-slot { flex: 1; width: 100%; position: relative; border-bottom: 1px solid rgba(226, 232, 240, 0.3); }
+        .lane-slot:hover { background-color: rgba(241, 245, 249, 0.8); }
 
         /* Style dla widoku eksportu */
         .export-lane-container { height: 220px; display: flex; flex-direction: column; }
@@ -40,7 +41,7 @@
     <script type="text/babel">
         const { useState, useMemo, useEffect, Fragment, useRef } = React;
 
-        const STORAGE_KEY = 'harmo_kliker_data';
+        const STORAGE_KEY = 'harmo_kliker_checkbox_v1';
         const ROLE_ORDER = ['analysis_biz', 'analysis_sys', 'design', 'dev_backend', 'dev_mobile', 'qa_backend', 'qa_mobile'];
 
         const getRoleLabel = (r) => ({ 
@@ -105,11 +106,8 @@
             const [isExporting, setIsExporting] = useState(false);
             const [isFormOpen, setIsFormOpen] = useState(false);
             
-            const [editingBlock, setEditingBlock] = useState(null);
-            const [editDuration, setEditDuration] = useState(1);
-            
-            // Stan dla notatek
-            const [viewingNote, setViewingNote] = useState(null); // { taskId, content }
+            // Notatki
+            const [viewingNote, setViewingNote] = useState(null);
             const [noteContent, setNoteContent] = useState("");
 
             const [dragState, setDragState] = useState(null);
@@ -130,15 +128,15 @@
                 } else {
                     setTasks([
                         { 
-                            id: '1', area: 'Onboarding', name: 'Pierwszy identyfikator (Przykład)', note: 'Wymaga ustaleń z zespołem Security w sprincie 2.',
+                            id: '1', area: 'Onboarding', name: 'Przykład: Rejestracja z przerwą', note: 'Zadanie ma lukę w harmonogramie (S3 jest wolny).',
                             schedule: {
-                                analysis_biz: { start: 1, duration: 1 },
-                                analysis_sys: { start: 1, duration: 1 },
-                                design: { start: 2, duration: 1 },
-                                dev_backend: { start: 2, duration: 2 },
-                                dev_mobile: { start: 3, duration: 2 },
-                                qa_backend: { start: 4, duration: 1 },
-                                qa_mobile: { start: 5, duration: 1 }
+                                analysis_biz: [1, 2], // Sprint 1 i 2
+                                analysis_sys: [2],
+                                design: [3],
+                                dev_backend: [4, 6], // Przerwa w sprincie 5
+                                dev_mobile: [5, 6],
+                                qa_backend: [6, 7],
+                                qa_mobile: [7]
                             }
                         }
                     ]);
@@ -172,7 +170,7 @@
                 e.preventDefault();
                 const id = Date.now().toString();
                 const schedule = {};
-                ROLE_ORDER.forEach(r => { schedule[r] = { start: 0, duration: 0 }; });
+                ROLE_ORDER.forEach(r => { schedule[r] = []; }); // Puste tablice sprintów
                 const newTask = { id, area: newArea || 'Ogólne', name: newTaskName || 'Nowe Zadanie', note: newNote, schedule };
                 setTasks([...tasks, newTask]);
                 setNewTaskName('');
@@ -180,14 +178,24 @@
                 setIsFormOpen(false);
             };
 
-            const allocateRole = (taskId, role, sprintIndex) => {
+            const toggleSprint = (taskId, role, sprintIndex) => {
+                const sprintNum = sprintIndex + 1;
                 setTasks(prev => prev.map(t => {
                     if (t.id === taskId) {
+                        const currentSprints = t.schedule[role] || [];
+                        let newSprints;
+                        if (currentSprints.includes(sprintNum)) {
+                            // Usuń
+                            newSprints = currentSprints.filter(s => s !== sprintNum);
+                        } else {
+                            // Dodaj
+                            newSprints = [...currentSprints, sprintNum].sort((a, b) => a - b);
+                        }
                         return {
                             ...t,
                             schedule: {
                                 ...t.schedule,
-                                [role]: { start: sprintIndex + 1, duration: 1 }
+                                [role]: newSprints
                             }
                         };
                     }
@@ -217,7 +225,7 @@
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
                 const link = document.createElement('a');
                 link.href = dataStr;
-                link.download = "harmo_kliker_baza.json";
+                link.download = "harmo_kliker_baza_checkbox.json";
                 link.click();
             };
 
@@ -248,15 +256,6 @@
                 }
             };
 
-            const saveEdit = () => {
-                if (!editingBlock) return;
-                setTasks(prev => prev.map(t => t.id === editingBlock.taskId ? {
-                    ...t,
-                    schedule: { ...t.schedule, [editingBlock.role]: { ...t.schedule[editingBlock.role], duration: editDuration } }
-                } : t));
-                setEditingBlock(null);
-            };
-
             const saveNote = () => {
                 if (!viewingNote) return;
                 setTasks(prev => prev.map(t => t.id === viewingNote.taskId ? { ...t, note: noteContent } : t));
@@ -264,22 +263,41 @@
             }
 
             const handleDragStart = (e, taskId, role, sprintIdx) => {
-                const task = tasks.find(t => t.id === taskId);
-                const offset = (sprintIdx + 1) - task.schedule[role].start;
-                setDragState({ taskId, role, dragOffset: offset });
+                // Zapamiętujemy, który konkretny sprint (klocek) jest przenoszony
+                const sprintNum = sprintIdx + 1;
+                setDragState({ taskId, role, sourceSprint: sprintNum });
             };
 
             const handleDrop = (e, targetSprintIndex) => {
                 e.preventDefault();
                 setDragOverSprint(null);
                 if (!dragState) return;
-                let ns = (targetSprintIndex + 1) - dragState.dragOffset;
-                if (ns < 1) ns = 1;
-                if (ns > sprintCount) ns = sprintCount;
-                setTasks(prev => prev.map(t => t.id === dragState.taskId ? {
-                    ...t,
-                    schedule: { ...t.schedule, [dragState.role]: { ...t.schedule[dragState.role], start: ns } }
-                } : t));
+                
+                const targetSprintNum = targetSprintIndex + 1;
+                // Jeśli upuszczamy w tym samym miejscu, nic nie rób
+                if (dragState.sourceSprint === targetSprintNum) {
+                    setDragState(null);
+                    return;
+                }
+
+                setTasks(prev => prev.map(t => {
+                    if (t.id === dragState.taskId) {
+                        const currentSprints = t.schedule[dragState.role] || [];
+                        // Usuń źródłowy sprint
+                        let newSprints = currentSprints.filter(s => s !== dragState.sourceSprint);
+                        // Dodaj docelowy sprint (jeśli jeszcze go tam nie ma)
+                        if (!newSprints.includes(targetSprintNum)) {
+                            newSprints.push(targetSprintNum);
+                        }
+                        newSprints.sort((a, b) => a - b);
+                        
+                        return {
+                            ...t,
+                            schedule: { ...t.schedule, [dragState.role]: newSprints }
+                        };
+                    }
+                    return t;
+                }));
                 setDragState(null);
             };
 
@@ -325,36 +343,13 @@
                         </div>
                     )}
 
-                    {/* Modal Edycji Klocka */}
-                    {editingBlock && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-                                <div className={`p-4 flex justify-between items-center ${getRoleColor(editingBlock.role).split(' ')[0]}`}>
-                                    <h2 className="text-sm font-black uppercase tracking-tight">Czas trwania: {getRoleLabel(editingBlock.role)}</h2>
-                                    <button onClick={() => setEditingBlock(null)}><Icon name="x" size={20}/></button>
-                                </div>
-                                <div className="p-6 space-y-4">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Ile sprintów zajmie ta praca?</p>
-                                    <div className="flex flex-wrap gap-2">
-                                        {[0, 1, 2, 3, 4, 5, 6, 8, 10].map(n => (
-                                            <button key={n} onClick={() => setEditDuration(n)} className={`flex-1 min-w-[60px] py-3 rounded-xl border-2 font-bold transition-all ${editDuration === n ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-100 text-slate-400'}`}>
-                                                {n === 0 ? 'Usuń' : n}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <button onClick={saveEdit} className="w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Zastosuj</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
                     <div className="mb-6 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <div className="flex justify-between items-center mb-6">
                             <div>
                                 <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2 italic tracking-tight uppercase">
                                     <Icon name="bar-chart-3" className="text-indigo-600"/> HARMO KLIKER
                                 </h1>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">20 Sprintów • Kliknij slot by alokować • Filtruj tory poniżej</p>
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">20 Sprintów • Kliknij kratkę by włączyć/wyłączyć • Filtruj tory poniżej</p>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => fileInputRef.current.click()} className="flex items-center gap-2 bg-white text-slate-600 px-4 py-2 rounded-lg font-black text-[10px] uppercase border hover:bg-slate-50 transition-colors">
@@ -407,7 +402,10 @@
                                         <textarea className="w-full p-3 rounded-xl border text-sm h-20 resize-none" placeholder="Np. wymaga ustaleń z zespołem Security" value={newNote} onChange={e => setNewNote(e.target.value)}></textarea>
                                     </div>
                                 </div>
-                                <button type="submit" className="mt-4 w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-[0.2em] hover:bg-slate-900 transition-all">Stwórz Zadanie</button>
+                                <div className="mt-4 p-3 bg-indigo-50 rounded-xl text-xs text-indigo-800 font-medium flex items-center gap-2">
+                                    <Icon name="info" size={16}/> Utworzysz pusty szablon. Klikaj w kratki na wykresie, aby dodawać/usuwać pracę w sprintach (tryb Checkbox).
+                                </div>
+                                <button type="submit" className="mt-4 w-full py-4 bg-slate-800 text-white rounded-xl font-black uppercase tracking-[0.2em] hover:bg-slate-900 transition-all">Stwórz Puste Zadanie</button>
                             </form>
                         )}
                     </div>
@@ -497,15 +495,17 @@
                                                             <div className="lane-container">
                                                                 <div className="lane-header-spacer border-b border-slate-50/30"></div>
                                                                 {ROLE_ORDER.map(role => {
-                                                                    const s = task.schedule[role];
-                                                                    const active = s && s.duration > 0 && (sIdx+1) >= s.start && (sIdx+1) < s.start + s.duration;
+                                                                    const schedule = task.schedule[role] || [];
+                                                                    const sprintNum = sIdx + 1;
+                                                                    const active = schedule.includes(sprintNum);
                                                                     const vis = selectedRole === 'all' || selectedRole === role;
                                                                     
                                                                     return (
                                                                         <div 
                                                                             key={role} 
-                                                                            className={`lane-slot ${!vis ? 'opacity-0 pointer-events-none' : 'cursor-pointer hover:bg-indigo-50/50'}`}
-                                                                            onClick={() => !active && vis && allocateRole(task.id, role, sIdx)}
+                                                                            className={`lane-slot ${!vis ? 'opacity-0 pointer-events-none' : 'cursor-pointer'}`}
+                                                                            onClick={() => vis && toggleSprint(task.id, role, sIdx)}
+                                                                            title={active ? "Kliknij, aby usunąć" : "Kliknij, aby dodać"}
                                                                         >
                                                                             {active && (
                                                                                 <div 
@@ -513,9 +513,8 @@
                                                                                     onDragStart={e => handleDragStart(e, task.id, role, sIdx)} 
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
-                                                                                        setEditingBlock({ taskId: task.id, role });
-                                                                                        setEditDuration(task.schedule[role].duration);
-                                                                                    }} 
+                                                                                        toggleSprint(task.id, role, sIdx); // Kliknięcie w klocek też go usuwa (toggle)
+                                                                                    }}
                                                                                     className={`absolute inset-0 m-[1.5px] rounded-[3px] shadow-sm border flex items-center justify-center text-[9px] font-black tracking-tighter transition-all hover:scale-[1.03] hover:shadow-md cursor-grab active:cursor-grabbing ${getRoleColor(role)}`}
                                                                                 >
                                                                                     {getRoleAbbr(role)}
@@ -536,7 +535,7 @@
                         </div>
                     </div>
 
-                    {/* --- UKRYTY WIDOK DO EKSPORTU (Zwiększona szerokość do 2400px) --- */}
+                    {/* --- UKRYTY WIDOK DO EKSPORTU --- */}
                     <div id="printable-export-view" style={{ position: 'absolute', top: -9999, left: -9999, width: '2400px', backgroundColor: 'white' }} className="p-8">
                         <div className="flex justify-between items-end mb-8 border-b-2 border-slate-800 pb-4">
                             <div>
@@ -587,8 +586,8 @@
                                                             <div className="export-lane-container">
                                                                 <div className="export-lane-header border-b border-slate-100 bg-slate-50/30"></div>
                                                                 {ROLE_ORDER.map(role => {
-                                                                    const s = task.schedule[role];
-                                                                    const active = s && s.duration > 0 && (sIdx+1) >= s.start && (sIdx+1) < s.start + s.duration;
+                                                                    const schedule = task.schedule[role] || [];
+                                                                    const active = schedule.includes(sIdx + 1);
                                                                     return (
                                                                         <div key={role} className="export-lane-slot border-b border-slate-50">
                                                                             {active && (
