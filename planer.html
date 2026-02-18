@@ -14,6 +14,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- html2canvas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- SheetJS with Styles (xlsx-js-style) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -229,56 +231,118 @@
                 link.click();
             };
 
-            // Eksport do Excela (Native HTML) - bez biblioteki SheetJS!
             const exportAsExcel = () => {
-                // Definicje kolorów (HEX z #)
+                if (typeof XLSX === 'undefined') {
+                    alert("Biblioteka Excel nie jest jeszcze załadowana. Spróbuj za chwilę.");
+                    return;
+                }
+
                 const roleColors = {
-                    analysis_biz: { fill: "#E9D5FF", text: "#581C87" },
-                    analysis_sys: { fill: "#9333EA", text: "#FFFFFF" },
-                    design: { fill: "#EC4899", text: "#FFFFFF" },
-                    dev_backend: { fill: "#1D4ED8", text: "#FFFFFF" },
-                    dev_mobile: { fill: "#60A5FA", text: "#FFFFFF" },
-                    qa_backend: { fill: "#059669", text: "#FFFFFF" },
-                    qa_mobile: { fill: "#34D399", text: "#022C22" }
+                    analysis_biz: { fill: "E9D5FF", text: "581C87" },
+                    analysis_sys: { fill: "9333EA", text: "FFFFFF" },
+                    design: { fill: "EC4899", text: "FFFFFF" },
+                    dev_backend: { fill: "1D4ED8", text: "FFFFFF" },
+                    dev_mobile: { fill: "60A5FA", text: "FFFFFF" },
+                    qa_backend: { fill: "059669", text: "FFFFFF" },
+                    qa_mobile: { fill: "34D399", text: "022C22" }
                 };
 
-                let tableHTML = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Harmonogram</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><style>td { border: 1px solid #cbd5e1; font-family: sans-serif; font-size: 10pt; vertical-align: middle; } .header { background-color: #0f172a; color: white; font-weight: bold; text-align: center; } .task-header { background-color: #1e293b; color: white; font-weight: bold; font-size: 12pt; } .role-label { background-color: #f8fafc; color: #64748b; text-align: right; }</style></head><body><table>';
+                const ws_data = [];
+                const headerRow = ["Obszar", "Zadanie / Rola", "Notatka"];
+                for(let i=1; i<=sprintCount; i++) headerRow.push(`S${i}`);
+                ws_data.push(headerRow);
 
-                // Nagłówki
-                tableHTML += '<tr><td class="header" style="width: 200px">Obszar</td><td class="header" style="width: 400px">Zadanie / Rola</td><td class="header" style="width: 300px">Notatka</td>';
-                for(let i=1; i<=sprintCount; i++) tableHTML += `<td class="header" style="width: 60px">S${i}</td>`;
-                tableHTML += '</tr>';
+                const headerStyle = {
+                    font: { bold: true, color: { rgb: "FFFFFF" } },
+                    fill: { fgColor: { rgb: "0F172A" } },
+                    alignment: { horizontal: "center", vertical: "center" },
+                    border: { bottom: { style: "medium", color: { rgb: "FFFFFF" } } }
+                };
+                
+                const taskHeaderStyle = {
+                    font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
+                    fill: { fgColor: { rgb: "1E293B" } },
+                    alignment: { vertical: "center" },
+                    border: { top: { style: "thin", color: { rgb: "CBD5E1" } } }
+                };
 
-                // Dane
+                const roleLabelStyle = {
+                    font: { sz: 10, color: { rgb: "64748B" } },
+                    alignment: { horizontal: "right", vertical: "center" },
+                    fill: { fgColor: { rgb: "F8FAFC" } }
+                };
+
+                const borderStyle = {
+                    top: { style: "thin", color: { rgb: "E2E8F0" } },
+                    bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                    left: { style: "thin", color: { rgb: "E2E8F0" } },
+                    right: { style: "thin", color: { rgb: "E2E8F0" } }
+                };
+
                 tasks.forEach(task => {
-                    // Wiersz Zadania
-                    tableHTML += `<tr><td class="task-header">${task.area}</td><td class="task-header">${task.name}</td><td class="task-header" style="white-space: normal;">${task.note || ''}</td>`;
-                    for(let i=0; i<sprintCount; i++) tableHTML += '<td class="task-header"></td>';
-                    tableHTML += '</tr>';
+                    const taskRow = [task.area, task.name, task.note || ""];
+                    for(let i=0; i<sprintCount; i++) taskRow.push("");
+                    ws_data.push(taskRow);
 
-                    // Wiersze ról
                     ROLE_ORDER.forEach(role => {
-                        tableHTML += `<tr><td></td><td class="role-label">${getRoleLabel(role)}</td><td></td>`;
+                        const roleRow = ["", getRoleLabel(role), ""];
                         const schedule = task.schedule[role] || [];
                         for(let i=1; i<=sprintCount; i++) {
                             if (schedule.includes(i)) {
-                                const style = roleColors[role] ? `background-color: ${roleColors[role].fill}; color: ${roleColors[role].text}; font-weight: bold; text-align: center;` : '';
-                                tableHTML += `<td style="${style}">${getRoleAbbr(role)}</td>`;
+                                roleRow.push(getRoleAbbr(role));
                             } else {
-                                tableHTML += '<td></td>';
+                                roleRow.push("");
                             }
                         }
-                        tableHTML += '</tr>';
+                        ws_data.push(roleRow);
                     });
                 });
 
-                tableHTML += '</table></body></html>';
+                const ws = XLSX.utils.aoa_to_sheet(ws_data);
+                const range = XLSX.utils.decode_range(ws['!ref']);
+                
+                for (let R = range.s.r; R <= range.e.r; ++R) {
+                    for (let C = range.s.c; C <= range.e.c; ++C) {
+                        const cellRef = XLSX.utils.encode_cell({c: C, r: R});
+                        if (!ws[cellRef]) ws[cellRef] = { v: "", t: "s" };
+                        const cell = ws[cellRef];
+                        cell.s = { border: borderStyle, alignment: { vertical: "center" } };
 
-                const blob = new Blob([tableHTML], { type: 'application/vnd.ms-excel' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = `Harmo-Kliker-${new Date().toISOString().slice(0, 10)}.xls`;
-                link.click();
+                        if (R === 0) {
+                            cell.s = headerStyle;
+                        } else {
+                            const isTaskHeaderRow = ws_data[R][0] !== "";
+                            if (isTaskHeaderRow) {
+                                cell.s = taskHeaderStyle;
+                                if (C === 2) cell.s = { ...taskHeaderStyle, alignment: { wrapText: true, vertical: "center" } };
+                            } else {
+                                if (C === 1) cell.s = roleLabelStyle;
+                                else if (C >= 3) {
+                                    const val = cell.v;
+                                    if (val !== "") {
+                                        const roleKey = ROLE_ORDER.find(r => getRoleAbbr(r) === val);
+                                        if (roleKey && roleColors[roleKey]) {
+                                            cell.s = {
+                                                fill: { fgColor: { rgb: roleColors[roleKey].fill } },
+                                                font: { color: { rgb: roleColors[roleKey].text }, bold: true },
+                                                alignment: { horizontal: "center", vertical: "center" },
+                                                border: borderStyle
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                const wscols = [{wch: 15}, {wch: 35}, {wch: 30}];
+                for(let i=0; i<sprintCount; i++) wscols.push({wch: 6});
+                ws['!cols'] = wscols;
+
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, ws, "Harmonogram");
+                XLSX.writeFile(workbook, `Harmo-Kliker-${new Date().toISOString().slice(0, 10)}.xlsx`);
             };
 
             const exportAsJPG = async () => {
@@ -315,7 +379,6 @@
             }
 
             const handleDragStart = (e, taskId, role, sprintIdx) => {
-                // Zapamiętujemy, który konkretny sprint (klocek) jest przenoszony
                 const sprintNum = sprintIdx + 1;
                 setDragState({ taskId, role, sourceSprint: sprintNum });
             };
@@ -326,7 +389,6 @@
                 if (!dragState) return;
                 
                 const targetSprintNum = targetSprintIndex + 1;
-                // Jeśli upuszczamy w tym samym miejscu, nic nie rób
                 if (dragState.sourceSprint === targetSprintNum) {
                     setDragState(null);
                     return;
@@ -335,18 +397,13 @@
                 setTasks(prev => prev.map(t => {
                     if (t.id === dragState.taskId) {
                         const currentSprints = t.schedule[dragState.role] || [];
-                        // Usuń źródłowy sprint
                         let newSprints = currentSprints.filter(s => s !== dragState.sourceSprint);
-                        // Dodaj docelowy sprint (jeśli jeszcze go tam nie ma)
                         if (!newSprints.includes(targetSprintNum)) {
                             newSprints.push(targetSprintNum);
                         }
                         newSprints.sort((a, b) => a - b);
                         
-                        return {
-                            ...t,
-                            schedule: { ...t.schedule, [dragState.role]: newSprints }
-                        };
+                        return { ...t, schedule: { ...t.schedule, [dragState.role]: newSprints } };
                     }
                     return t;
                 }));
@@ -466,13 +523,13 @@
                     </div>
 
                     <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-                        <div className="overflow-x-auto select-none">
+                        <div className="overflow-auto select-none max-h-[75vh]">
                             <table className="w-full border-collapse table-fixed min-w-[1800px]">
                                 <thead>
                                     <tr className="bg-slate-50 h-14 border-b">
-                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase w-[280px] sticky left-0 bg-slate-50 z-30 border-r shadow-sm">Zadanie & Tory</th>
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase w-[280px] sticky left-0 top-0 bg-slate-50 z-50 border-r shadow-sm">Zadanie & Tory</th>
                                         {Array.from({ length: sprintCount }).map((_, i) => (
-                                            <th key={i} className={`p-2 text-center text-[10px] font-black w-[80px] border-l uppercase tracking-widest ${dragOverSprint === i ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400'}`}>S{i+1}</th>
+                                            <th key={i} className={`p-2 text-center text-[10px] font-black w-[80px] border-l uppercase tracking-widest sticky top-0 z-40 ${dragOverSprint === i ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-50 text-slate-400'}`}>S{i+1}</th>
                                         ))}
                                     </tr>
                                 </thead>
@@ -486,7 +543,7 @@
                                             </tr>
                                             {areaTasks.map(task => (
                                                 <tr key={task.id} className="border-b hover:bg-slate-50/20 transition-colors group">
-                                                    <td className="p-0 sticky left-0 bg-white z-20 border-r shadow-md">
+                                                    <td className="p-0 sticky left-0 bg-white z-30 border-r shadow-md">
                                                         <div className="lane-container">
                                                             <div className="lane-header-spacer p-2 text-xs font-black text-slate-700 border-b border-slate-50 flex justify-between items-center bg-white">
                                                                 <div className="flex items-center gap-1 overflow-hidden w-full mr-1">
