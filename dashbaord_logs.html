@@ -162,7 +162,7 @@
         const AppState = {
             rawLogs: [],
             sessions: {}, // Zgrupowane logi po ID Klienta
-            uniqueUrls: new Map(), // URL -> liczba wystąpień ogółem
+            uniqueUrls: new Map(), // URL -> liczba unikalnych klientów
             selectedSteps: [], // Ułożone przez użytkownika kroki
             totalParsedClients: 0
         };
@@ -219,7 +219,6 @@
                     const parts = line.split('->');
                     if (parts.length === 2) {
                         const clientId = parts[0].trim();
-                        // Pobieramy ID sesji (część przed ewentualną kropką) z prawej strony
                         const rawSession = parts[1].trim();
                         const sessionId = rawSession.split('.')[0]; 
                         
@@ -228,10 +227,9 @@
                 }
             });
 
-            // Wyrażenie regularne do złapania kluczowych części logów
             const logRegex = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([^\s]+)\s+url=([^\s]+)\s+([A-Za-z]+)/;
 
-            // 2 PRZEBIEG: Właściwe przypisywanie logów
+            // 2 PRZEBIEG: Grupowanie logów pod ID klienta
             lines.forEach(line => {
                 line = line.trim();
                 if (!line || line.includes('->')) return;
@@ -244,24 +242,27 @@
                     const url = match[4];
                     const status = match[5];
 
-                    // Wyciągamy główny człon identyfikatora sesji
                     const sessionId = rawSessionString.split('.')[0]; 
-                    
-                    // Odnajdujemy ID klienta w przygotowanej mapie. 
-                    // Fallback do sessionId pozwala aplikacji działać nawet bez linii "->"
                     const clientId = sessionToClientMap[sessionId] || sessionId;
 
-                    // Teraz grupujemy logi na podstawie unikalnego identyfikatora KLIENTA
                     if (!AppState.sessions[clientId]) {
                         AppState.sessions[clientId] = [];
                     }
 
                     AppState.sessions[clientId].push({ date, time, url, status });
-
-                    if (status === 'OK') {
-                        AppState.uniqueUrls.set(url, (AppState.uniqueUrls.get(url) || 0) + 1);
-                    }
                 }
+            });
+
+            // 3 PRZEBIEG: Liczenie UNIKALNYCH klientów dla danego URL
+            // Dzięki temu duplikaty (np. 5 wywołań /preauth przez 1 klienta) liczą się jako 1
+            Object.values(AppState.sessions).forEach(clientLogs => {
+                const clientSuccessfulUrls = new Set(
+                    clientLogs.filter(log => log.status === 'OK').map(log => log.url)
+                );
+                
+                clientSuccessfulUrls.forEach(url => {
+                    AppState.uniqueUrls.set(url, (AppState.uniqueUrls.get(url) || 0) + 1);
+                });
             });
 
             AppState.totalParsedClients = Object.keys(AppState.sessions).length;
@@ -278,7 +279,7 @@
             els.stepList.innerHTML = '';
             const template = document.getElementById('stepTemplate');
 
-            // Sortujemy URLe malejąco po liczbie wystąpień (najpopularniejsze na górze jako domyślne)
+            // Sortujemy URLe malejąco po liczbie unikalnych klientów
             const sortedUrls = Array.from(AppState.uniqueUrls.entries()).sort((a, b) => b[1] - a[1]);
 
             sortedUrls.forEach(([url, count]) => {
@@ -287,7 +288,8 @@
                 li.dataset.url = url;
                 
                 clone.querySelector('.step-url').textContent = url;
-                clone.querySelector('.step-count').textContent = `Wystąpień: ${count}`;
+                // Zmiana tekstu dla większej czytelności
+                clone.querySelector('.step-count').textContent = `Unikalnych klientów: ${count}`;
                 
                 // Odznacz domyślnie rzeczy, które wyglądają jak zapytania tła
                 const checkbox = clone.querySelector('.step-checkbox');
@@ -301,7 +303,6 @@
                     else li.classList.add('opacity-60');
                 });
 
-                // --- NOWE: Obsługa kliknięć w strzałki ---
                 const btnUp = clone.querySelector('.move-up');
                 const btnDown = clone.querySelector('.move-down');
                 
@@ -317,15 +318,13 @@
                     const currentLi = e.target.closest('li');
                     const nextLi = currentLi.nextElementSibling;
                     if (nextLi) {
-                        currentLi.parentNode.insertBefore(nextLi, currentLi); // Wstaw za elementem następnym
+                        currentLi.parentNode.insertBefore(nextLi, currentLi);
                     }
                 });
-                // -----------------------------------------
 
                 els.stepList.appendChild(clone);
             });
 
-            // Inicjalizacja przeciągania
             if(sortableInstance) sortableInstance.destroy();
             sortableInstance = new Sortable(els.stepList, {
                 handle: '.drag-handle',
@@ -338,7 +337,6 @@
         els.generateBtn.addEventListener('click', () => {
             AppState.selectedSteps = [];
             
-            // Pobieranie zaznaczonych kroków w aktualnej kolejności (po przetasowaniu)
             document.querySelectorAll('#stepList li').forEach(li => {
                 const checkbox = li.querySelector('.step-checkbox');
                 if (checkbox.checked) {
@@ -357,14 +355,9 @@
         // 5. Główna logika obliczania lejka
         function calculateAndRenderFunnel() {
             const steps = AppState.selectedSteps;
-            // Tablica zliczająca sesje/klientów, którzy dotarli do danego kroku
             const funnelCounts = new Array(steps.length).fill(0);
             
-            // Logika ścisłego lejka (Strict Funnel):
-            // Klient musi zaliczyć krok 1, aby mógł zostać policzony w kroku 2.
-            
             Object.values(AppState.sessions).forEach(clientLogs => {
-                // Czyścimy logi tylko do statusów OK w ramach historii tego klienta
                 const successfulUrls = clientLogs
                     .filter(log => log.status === 'OK')
                     .map(log => log.url);
@@ -377,7 +370,6 @@
                     if (!hasFailed && successfulUrls.includes(targetUrl)) {
                         funnelCounts[i]++;
                     } else {
-                        // Jeśli klient nie ma tego kroku, odpada z lejka
                         hasFailed = true; 
                     }
                 }
@@ -395,22 +387,18 @@
             const totalCompleted = counts[counts.length - 1] || 0;
             const globalConversion = totalStarted > 0 ? ((totalCompleted / totalStarted) * 100).toFixed(1) : 0;
 
-            // Aktualizacja metryk na górze
             document.getElementById('statTotalClients').textContent = totalStarted;
             document.getElementById('statCompleted').textContent = totalCompleted;
             document.getElementById('statConversion').textContent = `${globalConversion}%`;
 
-            // Budowanie wykresu lejka
             els.funnelContainer.innerHTML = '';
             
             stepUrls.forEach((url, index) => {
                 const count = counts[index];
                 const prevCount = index === 0 ? count : counts[index - 1];
                 
-                // Procent względem pierwszego kroku (szerokość paska)
                 const widthPercent = totalStarted > 0 ? (count / totalStarted) * 100 : 0;
                 
-                // Konwersja i drop-off względem poprzedniego kroku
                 let stepConversionStr = "";
                 let dropOffStr = "";
                 
@@ -429,13 +417,11 @@
                     }
                 }
 
-                // Kolorowanie pasków. Od niebieskiego po zielony na końcu.
                 const isLast = index === stepUrls.length - 1;
                 const barColor = isLast ? 'bg-green-500' : 'bg-blue-500';
 
                 const html = `
                     <div class="relative pt-2">
-                        <!-- Informacje o kroku -->
                         <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-2 gap-2">
                             <div>
                                 <div class="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Krok ${index + 1}</div>
@@ -448,7 +434,6 @@
                             </div>
                         </div>
                         
-                        <!-- Pasek wizualny -->
                         <div class="w-full bg-gray-100 rounded-full h-8 overflow-hidden flex shadow-inner">
                             <div class="${barColor} h-8 rounded-full funnel-bar flex items-center px-4 justify-end text-white text-xs font-bold" 
                                  style="width: 0%" 
@@ -457,7 +442,6 @@
                             </div>
                         </div>
                         
-                        <!-- Linia łącząca (nie dla ostatniego) -->
                         ${!isLast ? `<div class="absolute left-6 bottom-[-24px] w-0.5 h-6 bg-gray-200"></div>` : ''}
                     </div>
                 `;
@@ -465,7 +449,6 @@
                 els.funnelContainer.insertAdjacentHTML('beforeend', html);
             });
 
-            // Animacja pasków po krótkim opóźnieniu, żeby UI zdążyło się zrenderować
             setTimeout(() => {
                 document.querySelectorAll('.funnel-bar').forEach(bar => {
                     bar.style.width = bar.getAttribute('data-target-width');
