@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizator Lejka Konwersji z Logów</title>
+    <!-- Tailwind CSS dla nowoczesnego wyglądu -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SortableJS do przeciągania elementów (Drag & Drop) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        
+        .funnel-bar {
+            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .drag-handle {
+            cursor: grab;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        
+        /* Animacja wejścia */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Nagłówek -->
+        <header class="bg-white rounded-2xl shadow-sm p-6 flex flex-col md:flex-row items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    </svg>
+                    Analizator Lejka z Logów
+                </h1>
+                <p class="text-gray-500 text-sm mt-1">Zbadaj ścieżki klientów i znajdź miejsca, gdzie przerywają proces.</p>
+            </div>
+            <button id="resetBtn" class="hidden mt-4 md:mt-0 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition-colors text-sm">
+                Wgraj nowy plik
+            </button>
+        </header>
+
+        <!-- KROK 1: Wgrywanie pliku -->
+        <section id="uploadSection" class="bg-white rounded-2xl shadow-sm p-8 text-center border-2 border-dashed border-gray-300 hover:border-blue-500 transition-colors cursor-pointer">
+            <input type="file" id="fileInput" class="hidden" accept=".log,.txt" />
+            <div class="flex flex-col items-center justify-center space-y-4" onclick="document.getElementById('fileInput').click()">
+                <div class="bg-blue-50 p-4 rounded-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-700">Kliknij, aby wgrać plik .log</h3>
+                    <p class="text-gray-500 text-sm mt-1">Narzędzie przetwarza dane tylko w Twojej przeglądarce. Żadne dane nie są wysyłane na serwer.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pasek ładowania -->
+        <div id="loading" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-blue-600"></div>
+            <p class="text-gray-500 mt-2">Przetwarzanie logów...</p>
+        </div>
+
+        <!-- KROK 2: Konfiguracja Lejka -->
+        <section id="configSection" class="hidden bg-white rounded-2xl shadow-sm p-6 animate-fade-in">
+            <div class="mb-6">
+                <h2 class="text-xl font-bold text-gray-800">Skonfiguruj kroki lejka</h2>
+                <p class="text-gray-500 text-sm mt-1">Znaleźliśmy poniższe unikalne URL-e w Twoich logach. Zaznacz te, które stanowią proces, i przeciągnij je (☰), aby ułożyć je w poprawnej kolejności logicznej.</p>
+            </div>
+
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <ul id="stepList" class="space-y-2">
+                    <!-- Kroki będą generowane tutaj przez JS -->
+                </ul>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button id="generateFunnelBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md transition-all transform hover:scale-105">
+                    Generuj Dashboard Konwersji
+                </button>
+            </div>
+        </section>
+
+        <!-- KROK 3: Dashboard (Wyniki) -->
+        <section id="dashboardSection" class="hidden animate-fade-in space-y-6">
+            
+            <!-- Karty ze statystykami -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500">
+                    <p class="text-sm text-gray-500 font-medium">Całkowita liczba unikalnych sesji</p>
+                    <h3 id="statTotalSessions" class="text-3xl font-bold text-gray-800 mt-2">0</h3>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-green-500">
+                    <p class="text-sm text-gray-500 font-medium">Ukończyło cały proces</p>
+                    <h3 id="statCompleted" class="text-3xl font-bold text-gray-800 mt-2">0</h3>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-purple-500">
+                    <p class="text-sm text-gray-500 font-medium">Ogólna konwersja (Start → Koniec)</p>
+                    <h3 id="statConversion" class="text-3xl font-bold text-gray-800 mt-2">0%</h3>
+                </div>
+            </div>
+
+            <!-- Wizualizacja Lejka -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h2 class="text-xl font-bold text-gray-800 mb-6">Wizualizacja spadków (Gdzie uciekają klienci?)</h2>
+                
+                <div id="funnelContainer" class="space-y-6 relative">
+                    <!-- Słupki lejka będą generowane tutaj -->
+                </div>
+            </div>
+
+        </section>
+
+    </div>
+
+    <!-- Szablon kroku do konfiguracji (ukryty) -->
+    <template id="stepTemplate">
+        <li class="flex items-center bg-white p-3 rounded-lg shadow-sm border border-gray-200 gap-3 group">
+            <div class="drag-handle text-gray-400 hover:text-gray-700 px-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </div>
+            <input type="checkbox" class="step-checkbox w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer" checked>
+            <span class="step-url font-mono text-sm text-gray-700 flex-grow break-all"></span>
+            <span class="step-count text-xs font-semibold bg-gray-100 text-gray-500 py-1 px-2 rounded-full"></span>
+        </li>
+    </template>
+
+    <script>
+        // Główny obiekt przechowujący dane w pamięci przeglądarki
+        const AppState = {
+            rawLogs: [],
+            sessions: {}, // Zgrupowane logi po ID sesji
+            uniqueUrls: new Map(), // URL -> liczba wystąpień ogółem
+            selectedSteps: [], // Ułożone przez użytkownika kroki
+            totalParsedSessions: 0
+        };
+
+        // Elementy DOM
+        const els = {
+            fileInput: document.getElementById('fileInput'),
+            uploadSection: document.getElementById('uploadSection'),
+            loading: document.getElementById('loading'),
+            configSection: document.getElementById('configSection'),
+            stepList: document.getElementById('stepList'),
+            generateBtn: document.getElementById('generateFunnelBtn'),
+            dashboardSection: document.getElementById('dashboardSection'),
+            funnelContainer: document.getElementById('funnelContainer'),
+            resetBtn: document.getElementById('resetBtn')
+        };
+
+        // Inicjalizacja Drag & Drop
+        let sortableInstance = null;
+
+        // 1. Obsługa wczytywania pliku
+        els.fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            els.uploadSection.classList.add('hidden');
+            els.loading.classList.remove('hidden');
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                setTimeout(() => processLogText(text), 100); // Małe opóźnienie dla pokazania loadera
+            };
+            reader.readAsText(file);
+        });
+
+        els.resetBtn.addEventListener('click', () => {
+            location.reload(); // Najprostszy reset stanu
+        });
+
+        // 2. Parsowanie logów
+        function processLogText(text) {
+            const lines = text.split('\n');
+            AppState.sessions = {};
+            AppState.uniqueUrls.clear();
+
+            // Przykładowa linia: 2026-03-05 01:44:28 YmJlNjUz...Nzg0.pzMokdB... url=/opencustomer/checkaction OK 0.126s
+            // Wyrażenie regularne do złapania kluczowych części
+            const logRegex = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([^\s]+)\s+url=([^\s]+)\s+([A-Za-z]+)/;
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line) return;
+
+                // Pomijamy linie mapowania klientów (z '->') i błędy formatu
+                if (line.includes('->')) return;
+
+                const match = line.match(logRegex);
+                if (match) {
+                    const date = match[1];
+                    const time = match[2];
+                    const rawSessionString = match[3];
+                    const url = match[4];
+                    const status = match[5];
+
+                    // Wyciąganie głównego ID sesji (przed pierwszą kropką)
+                    // Z logów widać, że końcówka (.pzMok...) zmienia się w ramach sesji.
+                    const sessionId = rawSessionString.split('.')[0]; 
+
+                    if (!AppState.sessions[sessionId]) {
+                        AppState.sessions[sessionId] = [];
+                    }
+
+                    AppState.sessions[sessionId].push({ date, time, url, status });
+
+                    // Zliczanie unikalnych URLi (tylko do podglądu w konfiguratorze)
+                    if (status === 'OK') {
+                        AppState.uniqueUrls.set(url, (AppState.uniqueUrls.get(url) || 0) + 1);
+                    }
+                }
+            });
+
+            AppState.totalParsedSessions = Object.keys(AppState.sessions).length;
+            
+            buildConfigUI();
+        }
+
+        // 3. Budowanie interfejsu konfiguracji kroków
+        function buildConfigUI() {
+            els.loading.classList.add('hidden');
+            els.configSection.classList.remove('hidden');
+            els.resetBtn.classList.remove('hidden');
+
+            els.stepList.innerHTML = '';
+            const template = document.getElementById('stepTemplate');
+
+            // Sortujemy URLe malejąco po liczbie wystąpień (najpopularniejsze na górze jako domyślne)
+            const sortedUrls = Array.from(AppState.uniqueUrls.entries()).sort((a, b) => b[1] - a[1]);
+
+            sortedUrls.forEach(([url, count]) => {
+                const clone = template.content.cloneNode(true);
+                const li = clone.querySelector('li');
+                li.dataset.url = url;
+                
+                clone.querySelector('.step-url').textContent = url;
+                clone.querySelector('.step-count').textContent = `Wystąpień: ${count}`;
+                
+                // Odznacz domyślnie rzeczy, które wyglądają jak zapytania tła
+                const checkbox = clone.querySelector('.step-checkbox');
+                if (url.includes('refresh') || url.includes('fetch') || url.includes('checkstatus')) {
+                    checkbox.checked = false;
+                    li.classList.add('opacity-60');
+                }
+
+                checkbox.addEventListener('change', function() {
+                    if(this.checked) li.classList.remove('opacity-60');
+                    else li.classList.add('opacity-60');
+                });
+
+                els.stepList.appendChild(clone);
+            });
+
+            // Inicjalizacja przeciągania
+            if(sortableInstance) sortableInstance.destroy();
+            sortableInstance = new Sortable(els.stepList, {
+                handle: '.drag-handle',
+                animation: 150,
+                ghostClass: 'bg-blue-50'
+            });
+        }
+
+        // 4. Obsługa przycisku "Generuj"
+        els.generateBtn.addEventListener('click', () => {
+            AppState.selectedSteps = [];
+            
+            // Pobieranie zaznaczonych kroków w aktualnej kolejności (po przetasowaniu)
+            document.querySelectorAll('#stepList li').forEach(li => {
+                const checkbox = li.querySelector('.step-checkbox');
+                if (checkbox.checked) {
+                    AppState.selectedSteps.push(li.dataset.url);
+                }
+            });
+
+            if (AppState.selectedSteps.length < 2) {
+                alert("Zaznacz przynajmniej 2 kroki, aby zbudować lejek konwersji.");
+                return;
+            }
+
+            calculateAndRenderFunnel();
+        });
+
+        // 5. Główna logika obliczania lejka
+        function calculateAndRenderFunnel() {
+            const steps = AppState.selectedSteps;
+            // Tablica zliczająca sesje, które dotarły do danego kroku
+            const funnelCounts = new Array(steps.length).fill(0);
+            
+            // Logika ścisłego lejka (Strict Funnel):
+            // Użytkownik musi zaliczyć krok 1, aby mógł zostać policzony w kroku 2.
+            
+            Object.values(AppState.sessions).forEach(sessionLogs => {
+                // Czyścimy logi tylko do statusów OK w ramach tej sesji dla szybkości
+                const successfulUrls = sessionLogs
+                    .filter(log => log.status === 'OK')
+                    .map(log => log.url);
+
+                let hasFailed = false;
+
+                for (let i = 0; i < steps.length; i++) {
+                    const targetUrl = steps[i];
+                    
+                    // Sprawdzamy czy dany URL wystąpił z sukcesem w sesji
+                    // W tej implementacji nie sprawdzamy rygorystycznie czasu (timestamp), 
+                    // ponieważ w API kolejność zapytań asynchronicznych bywa ułamkowo przestawiona.
+                    // Sprawdzamy wystąpienie faktu przejścia kroku.
+                    if (!hasFailed && successfulUrls.includes(targetUrl)) {
+                        funnelCounts[i]++;
+                    } else {
+                        // Jeśli sesja nie ma tego kroku, odpada z lejka dla kolejnych kroków
+                        hasFailed = true; 
+                    }
+                }
+            });
+
+            renderDashboard(funnelCounts, steps);
+        }
+
+        // 6. Rysowanie wyników
+        function renderDashboard(counts, stepUrls) {
+            els.configSection.classList.add('hidden');
+            els.dashboardSection.classList.remove('hidden');
+
+            const totalStarted = counts[0] || 0;
+            const totalCompleted = counts[counts.length - 1] || 0;
+            const globalConversion = totalStarted > 0 ? ((totalCompleted / totalStarted) * 100).toFixed(1) : 0;
+
+            // Aktualizacja metryk na górze
+            document.getElementById('statTotalSessions').textContent = totalStarted;
+            document.getElementById('statCompleted').textContent = totalCompleted;
+            document.getElementById('statConversion').textContent = `${globalConversion}%`;
+
+            // Budowanie wykresu lejka
+            els.funnelContainer.innerHTML = '';
+            
+            stepUrls.forEach((url, index) => {
+                const count = counts[index];
+                const prevCount = index === 0 ? count : counts[index - 1];
+                
+                // Procent względem pierwszego kroku (szerokość paska)
+                const widthPercent = totalStarted > 0 ? (count / totalStarted) * 100 : 0;
+                
+                // Konwersja i drop-off względem poprzedniego kroku
+                let stepConversionStr = "";
+                let dropOffStr = "";
+                
+                if (index > 0) {
+                    const stepConversion = prevCount > 0 ? ((count / prevCount) * 100).toFixed(1) : 0;
+                    const dropOffCount = prevCount - count;
+                    const dropOffPercent = prevCount > 0 ? ((dropOffCount / prevCount) * 100).toFixed(1) : 0;
+                    
+                    stepConversionStr = `<span class="text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-semibold">↑ ${stepConversion}% przeszło dalej</span>`;
+                    
+                    if(dropOffCount > 0) {
+                        dropOffStr = `<span class="text-red-500 bg-red-50 px-2 py-1 rounded text-xs font-semibold flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                            Odpada: ${dropOffCount} (${dropOffPercent}%)
+                        </span>`;
+                    }
+                }
+
+                // Kolorowanie pasków. Od niebieskiego po zielony na końcu.
+                const isLast = index === stepUrls.length - 1;
+                const barColor = isLast ? 'bg-green-500' : 'bg-blue-500';
+
+                const html = `
+                    <div class="relative pt-2">
+                        <!-- Informacje o kroku -->
+                        <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-2 gap-2">
+                            <div>
+                                <div class="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Krok ${index + 1}</div>
+                                <div class="font-mono text-sm text-gray-800 break-all font-medium">${url}</div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                ${dropOffStr}
+                                ${stepConversionStr}
+                                <div class="text-xl font-bold text-gray-800 min-w-[3rem] text-right">${count}</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Pasek wizualny -->
+                        <div class="w-full bg-gray-100 rounded-full h-8 overflow-hidden flex shadow-inner">
+                            <div class="${barColor} h-8 rounded-full funnel-bar flex items-center px-4 justify-end text-white text-xs font-bold" 
+                                 style="width: 0%" 
+                                 data-target-width="${widthPercent}%">
+                                ${widthPercent > 10 ? widthPercent.toFixed(1) + '%' : ''}
+                            </div>
+                        </div>
+                        
+                        <!-- Linia łącząca (nie dla ostatniego) -->
+                        ${!isLast ? `<div class="absolute left-6 bottom-[-24px] w-0.5 h-6 bg-gray-200"></div>` : ''}
+                    </div>
+                `;
+                
+                els.funnelContainer.insertAdjacentHTML('beforeend', html);
+            });
+
+            // Animacja pasków po krótkim opóźnieniu, żeby UI zdążyło się zrenderować
+            setTimeout(() => {
+                document.querySelectorAll('.funnel-bar').forEach(bar => {
+                    bar.style.width = bar.getAttribute('data-target-width');
+                });
+            }, 50);
+        }
+    </script>
+</body>
+</html>
