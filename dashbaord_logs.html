@@ -48,7 +48,7 @@
             <div>
                 <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                     </svg>
                     Analizator Lejka z Logów
                 </h1>
@@ -85,7 +85,7 @@
         <section id="configSection" class="hidden bg-white rounded-2xl shadow-sm p-6 animate-fade-in">
             <div class="mb-6">
                 <h2 class="text-xl font-bold text-gray-800">Skonfiguruj kroki lejka</h2>
-                <p class="text-gray-500 text-sm mt-1">Znaleźliśmy poniższe unikalne URL-e w Twoich logach. Zaznacz te, które stanowią proces, i przeciągnij je (☰), aby ułożyć je w poprawnej kolejności logicznej.</p>
+                <p class="text-gray-500 text-sm mt-1">Znaleźliśmy poniższe unikalne URL-e w Twoich logach. Zaznacz te, które stanowią proces, i przeciągnij je (☰) lub użyj strzałek, aby ułożyć w poprawnej kolejności.</p>
             </div>
 
             <div class="bg-gray-50 rounded-xl p-4 border border-gray-200">
@@ -136,7 +136,6 @@
     <!-- Szablon kroku do konfiguracji (ukryty) -->
     <template id="stepTemplate">
         <li class="flex items-center bg-white p-3 rounded-lg shadow-sm border border-gray-200 gap-3 group">
-            <!-- Dodane strzałki do przesuwania -->
             <div class="flex flex-col gap-1 pr-2 border-r border-gray-100">
                 <button type="button" class="move-up text-gray-400 hover:text-blue-600 focus:outline-none p-1 bg-gray-50 rounded hover:bg-blue-50" title="Przesuń w górę">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" /></svg>
@@ -145,7 +144,6 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 </button>
             </div>
-            <!-- Zwykły uchwyt do przeciągania (zachowany dla wygody) -->
             <div class="drag-handle text-gray-300 hover:text-gray-500 px-1 hidden sm:block cursor-grab">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -158,16 +156,14 @@
     </template>
 
     <script>
-        // Główny obiekt przechowujący dane w pamięci przeglądarki
         const AppState = {
             rawLogs: [],
-            sessions: {}, // Zgrupowane logi po ID Klienta
-            uniqueUrls: new Map(), // URL -> liczba unikalnych klientów
-            selectedSteps: [], // Ułożone przez użytkownika kroki
+            sessions: {}, 
+            uniqueUrls: new Map(), 
+            selectedSteps: [], 
             totalParsedClients: 0
         };
 
-        // Elementy DOM
         const els = {
             fileInput: document.getElementById('fileInput'),
             uploadSection: document.getElementById('uploadSection'),
@@ -180,10 +176,8 @@
             resetBtn: document.getElementById('resetBtn')
         };
 
-        // Inicjalizacja Drag & Drop
         let sortableInstance = null;
 
-        // 1. Obsługa wczytywania pliku
         els.fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -194,16 +188,15 @@
             const reader = new FileReader();
             reader.onload = (event) => {
                 const text = event.target.result;
-                setTimeout(() => processLogText(text), 100); // Małe opóźnienie dla pokazania loadera
+                setTimeout(() => processLogText(text), 100); 
             };
             reader.readAsText(file);
         });
 
         els.resetBtn.addEventListener('click', () => {
-            location.reload(); // Najprostszy reset stanu
+            location.reload(); 
         });
 
-        // 2. Parsowanie logów
         function processLogText(text) {
             const lines = text.split('\n');
             AppState.sessions = {};
@@ -214,34 +207,50 @@
             // 1 PRZEBIEG: Tworzenie mapy ID Sesji -> ID Klienta
             lines.forEach(line => {
                 line = line.trim();
-                // Szukamy linii mapujących, np. "11111111111 -> YmJlNjUz..."
                 if (line.includes('->')) {
                     const parts = line.split('->');
-                    if (parts.length === 2) {
+                    if (parts.length >= 2) {
                         const clientId = parts[0].trim();
                         const rawSession = parts[1].trim();
-                        const sessionId = rawSession.split('.')[0]; 
+                        // Odcinamy ewentualne kropki i upewniamy się, że to pierwszy człon
+                        const sessionId = rawSession.split('.')[0].split(/\s+/)[0]; 
                         
-                        sessionToClientMap[sessionId] = clientId;
+                        if(clientId && sessionId) {
+                            sessionToClientMap[sessionId] = clientId;
+                        }
                     }
                 }
             });
 
-            const logRegex = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([^\s]+)\s+url=([^\s]+)\s+([A-Za-z]+)/;
-
-            // 2 PRZEBIEG: Grupowanie logów pod ID klienta
+            // 2 PRZEBIEG: Grupowanie logów (Zoptymalizowany, kuloodporny parser)
             lines.forEach(line => {
                 line = line.trim();
                 if (!line || line.includes('->')) return;
 
-                const match = line.match(logRegex);
-                if (match) {
-                    const date = match[1];
-                    const time = match[2];
-                    const rawSessionString = match[3];
-                    const url = match[4];
-                    const status = match[5];
+                // Dzielimy po dowolnej ilości spacji (odporne na formatowanie serwera)
+                const parts = line.split(/\s+/);
+                
+                // Znajdujemy indeks elementu zaczynającego się od "url="
+                const urlPartIndex = parts.findIndex(p => p.startsWith('url='));
 
+                if (urlPartIndex !== -1 && urlPartIndex >= 2) {
+                    const date = parts[0];
+                    const time = parts[1];
+                    // Identyfikator sesji jest zazwyczaj bezpośrednio przed URL
+                    const rawSessionString = parts[urlPartIndex - 1]; 
+                    
+                    // KROK KRYTYCZNY 1: Oczyszczanie URL
+                    // Usuwamy prefix "url="
+                    let rawUrl = parts[urlPartIndex].substring(4);
+                    // Odcinamy ewentualne parametry query (np. ?token=123), które sztucznie fragmentują dane!
+                    let url = rawUrl.split('?')[0]; 
+                    // Opcjonalnie: usuwamy trailing slash, żeby /checkaction == /checkaction/
+                    url = url.replace(/\/$/, "");
+
+                    // KROK KRYTYCZNY 2: Standaryzacja statusu (Ok == OK == ok)
+                    const status = parts[urlPartIndex + 1] ? parts[urlPartIndex + 1].toUpperCase() : '';
+
+                    // Ekstrakcja głównego ID sesji
                     const sessionId = rawSessionString.split('.')[0]; 
                     const clientId = sessionToClientMap[sessionId] || sessionId;
 
@@ -254,7 +263,6 @@
             });
 
             // 3 PRZEBIEG: Liczenie UNIKALNYCH klientów dla danego URL
-            // Dzięki temu duplikaty (np. 5 wywołań /preauth przez 1 klienta) liczą się jako 1
             Object.values(AppState.sessions).forEach(clientLogs => {
                 const clientSuccessfulUrls = new Set(
                     clientLogs.filter(log => log.status === 'OK').map(log => log.url)
@@ -270,7 +278,6 @@
             buildConfigUI();
         }
 
-        // 3. Budowanie interfejsu konfiguracji kroków
         function buildConfigUI() {
             els.loading.classList.add('hidden');
             els.configSection.classList.remove('hidden');
@@ -279,7 +286,6 @@
             els.stepList.innerHTML = '';
             const template = document.getElementById('stepTemplate');
 
-            // Sortujemy URLe malejąco po liczbie unikalnych klientów
             const sortedUrls = Array.from(AppState.uniqueUrls.entries()).sort((a, b) => b[1] - a[1]);
 
             sortedUrls.forEach(([url, count]) => {
@@ -288,10 +294,8 @@
                 li.dataset.url = url;
                 
                 clone.querySelector('.step-url').textContent = url;
-                // Zmiana tekstu dla większej czytelności
                 clone.querySelector('.step-count').textContent = `Unikalnych klientów: ${count}`;
                 
-                // Odznacz domyślnie rzeczy, które wyglądają jak zapytania tła
                 const checkbox = clone.querySelector('.step-checkbox');
                 if (url.includes('refresh') || url.includes('fetch') || url.includes('checkstatus')) {
                     checkbox.checked = false;
@@ -333,7 +337,6 @@
             });
         }
 
-        // 4. Obsługa przycisku "Generuj"
         els.generateBtn.addEventListener('click', () => {
             AppState.selectedSteps = [];
             
@@ -352,7 +355,6 @@
             calculateAndRenderFunnel();
         });
 
-        // 5. Główna logika obliczania lejka
         function calculateAndRenderFunnel() {
             const steps = AppState.selectedSteps;
             const funnelCounts = new Array(steps.length).fill(0);
@@ -378,7 +380,6 @@
             renderDashboard(funnelCounts, steps);
         }
 
-        // 6. Rysowanie wyników
         function renderDashboard(counts, stepUrls) {
             els.configSection.classList.add('hidden');
             els.dashboardSection.classList.remove('hidden');
