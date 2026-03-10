@@ -107,8 +107,8 @@
             <!-- Karty ze statystykami -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500">
-                    <p class="text-sm text-gray-500 font-medium">Całkowita liczba unikalnych sesji</p>
-                    <h3 id="statTotalSessions" class="text-3xl font-bold text-gray-800 mt-2">0</h3>
+                    <p class="text-sm text-gray-500 font-medium">Całkowita liczba unikalnych klientów</p>
+                    <h3 id="statTotalClients" class="text-3xl font-bold text-gray-800 mt-2">0</h3>
                 </div>
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-green-500">
                     <p class="text-sm text-gray-500 font-medium">Ukończyło cały proces</p>
@@ -161,10 +161,10 @@
         // Główny obiekt przechowujący dane w pamięci przeglądarki
         const AppState = {
             rawLogs: [],
-            sessions: {}, // Zgrupowane logi po ID sesji
+            sessions: {}, // Zgrupowane logi po ID Klienta
             uniqueUrls: new Map(), // URL -> liczba wystąpień ogółem
             selectedSteps: [], // Ułożone przez użytkownika kroki
-            totalParsedSessions: 0
+            totalParsedClients: 0
         };
 
         // Elementy DOM
@@ -209,16 +209,32 @@
             AppState.sessions = {};
             AppState.uniqueUrls.clear();
 
-            // Przykładowa linia: 2026-03-05 01:44:28 YmJlNjUz...Nzg0.pzMokdB... url=/opencustomer/checkaction OK 0.126s
-            // Wyrażenie regularne do złapania kluczowych części
-            const logRegex = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([^\s]+)\s+url=([^\s]+)\s+([A-Za-z]+)/;
+            const sessionToClientMap = {};
 
+            // 1 PRZEBIEG: Tworzenie mapy ID Sesji -> ID Klienta
             lines.forEach(line => {
                 line = line.trim();
-                if (!line) return;
+                // Szukamy linii mapujących, np. "11111111111 -> YmJlNjUz..."
+                if (line.includes('->')) {
+                    const parts = line.split('->');
+                    if (parts.length === 2) {
+                        const clientId = parts[0].trim();
+                        // Pobieramy ID sesji (część przed ewentualną kropką) z prawej strony
+                        const rawSession = parts[1].trim();
+                        const sessionId = rawSession.split('.')[0]; 
+                        
+                        sessionToClientMap[sessionId] = clientId;
+                    }
+                }
+            });
 
-                // Pomijamy linie mapowania klientów (z '->') i błędy formatu
-                if (line.includes('->')) return;
+            // Wyrażenie regularne do złapania kluczowych części logów
+            const logRegex = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([^\s]+)\s+url=([^\s]+)\s+([A-Za-z]+)/;
+
+            // 2 PRZEBIEG: Właściwe przypisywanie logów
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line || line.includes('->')) return;
 
                 const match = line.match(logRegex);
                 if (match) {
@@ -228,24 +244,27 @@
                     const url = match[4];
                     const status = match[5];
 
-                    // Wyciąganie głównego ID sesji (przed pierwszą kropką)
-                    // Z logów widać, że końcówka (.pzMok...) zmienia się w ramach sesji.
+                    // Wyciągamy główny człon identyfikatora sesji
                     const sessionId = rawSessionString.split('.')[0]; 
+                    
+                    // Odnajdujemy ID klienta w przygotowanej mapie. 
+                    // Fallback do sessionId pozwala aplikacji działać nawet bez linii "->"
+                    const clientId = sessionToClientMap[sessionId] || sessionId;
 
-                    if (!AppState.sessions[sessionId]) {
-                        AppState.sessions[sessionId] = [];
+                    // Teraz grupujemy logi na podstawie unikalnego identyfikatora KLIENTA
+                    if (!AppState.sessions[clientId]) {
+                        AppState.sessions[clientId] = [];
                     }
 
-                    AppState.sessions[sessionId].push({ date, time, url, status });
+                    AppState.sessions[clientId].push({ date, time, url, status });
 
-                    // Zliczanie unikalnych URLi (tylko do podglądu w konfiguratorze)
                     if (status === 'OK') {
                         AppState.uniqueUrls.set(url, (AppState.uniqueUrls.get(url) || 0) + 1);
                     }
                 }
             });
 
-            AppState.totalParsedSessions = Object.keys(AppState.sessions).length;
+            AppState.totalParsedClients = Object.keys(AppState.sessions).length;
             
             buildConfigUI();
         }
@@ -338,15 +357,15 @@
         // 5. Główna logika obliczania lejka
         function calculateAndRenderFunnel() {
             const steps = AppState.selectedSteps;
-            // Tablica zliczająca sesje, które dotarły do danego kroku
+            // Tablica zliczająca sesje/klientów, którzy dotarli do danego kroku
             const funnelCounts = new Array(steps.length).fill(0);
             
             // Logika ścisłego lejka (Strict Funnel):
-            // Użytkownik musi zaliczyć krok 1, aby mógł zostać policzony w kroku 2.
+            // Klient musi zaliczyć krok 1, aby mógł zostać policzony w kroku 2.
             
-            Object.values(AppState.sessions).forEach(sessionLogs => {
-                // Czyścimy logi tylko do statusów OK w ramach tej sesji dla szybkości
-                const successfulUrls = sessionLogs
+            Object.values(AppState.sessions).forEach(clientLogs => {
+                // Czyścimy logi tylko do statusów OK w ramach historii tego klienta
+                const successfulUrls = clientLogs
                     .filter(log => log.status === 'OK')
                     .map(log => log.url);
 
@@ -355,14 +374,10 @@
                 for (let i = 0; i < steps.length; i++) {
                     const targetUrl = steps[i];
                     
-                    // Sprawdzamy czy dany URL wystąpił z sukcesem w sesji
-                    // W tej implementacji nie sprawdzamy rygorystycznie czasu (timestamp), 
-                    // ponieważ w API kolejność zapytań asynchronicznych bywa ułamkowo przestawiona.
-                    // Sprawdzamy wystąpienie faktu przejścia kroku.
                     if (!hasFailed && successfulUrls.includes(targetUrl)) {
                         funnelCounts[i]++;
                     } else {
-                        // Jeśli sesja nie ma tego kroku, odpada z lejka dla kolejnych kroków
+                        // Jeśli klient nie ma tego kroku, odpada z lejka
                         hasFailed = true; 
                     }
                 }
@@ -381,7 +396,7 @@
             const globalConversion = totalStarted > 0 ? ((totalCompleted / totalStarted) * 100).toFixed(1) : 0;
 
             // Aktualizacja metryk na górze
-            document.getElementById('statTotalSessions').textContent = totalStarted;
+            document.getElementById('statTotalClients').textContent = totalStarted;
             document.getElementById('statCompleted').textContent = totalCompleted;
             document.getElementById('statConversion').textContent = `${globalConversion}%`;
 
